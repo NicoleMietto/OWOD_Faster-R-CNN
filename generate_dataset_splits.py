@@ -107,13 +107,23 @@ if __name__ == "__main__":
                         
     future_for_task1 = [c for c in COCO_ALL_CLASSES if c not in TASK_1_CLASSES]
 
+    # Percorsi di default per Kaggle (se usi "COCO 2017 Dataset" di Awsaf49)
+    # Se la tua cartella si chiama diversamente, aggiorna queste variabili:
+    TRAIN_ANNOTATIONS = '/kaggle/input/coco-2017-dataset/coco2017/annotations/instances_train2017.json'
+    VAL_ANNOTATIONS = '/kaggle/input/coco-2017-dataset/coco2017/annotations/instances_val2017.json'
+
     print("--- Generazione Split Task 1 ---")
+    
     # 1. Genera il master dataset dal training originale di COCO
-    # master_dict = generate_unknown_unknown_split('instances_train2017.json', 'task1_uu_master.json', TASK_1_CLASSES, future_for_task1)
+    print("1. Creazione del master split (Unknown-Unknown) dal Train COCO...")
+    master_dict = generate_unknown_unknown_split(TRAIN_ANNOTATIONS, 'task1_uu_master.json', TASK_1_CLASSES, future_for_task1)
     
     # 2. Dividilo in 90% Train e 10% Val per l'Early Stopping
-    # se hai de-commentato la riga precedente:
-    # split_and_save(master_dict, 'task1_uu_train.json', 'task1_uu_val.json', split_ratio=0.9)
+    print("2. Suddivisione in Train (90%) e Validation (10%) per Early Stopping...")
+    split_and_save(master_dict, 'task1_uu_train.json', 'task1_uu_val.json', split_ratio=0.9)
     
     # 3. Genera il Test Set (usando il val2017 di COCO originale)
-    # test_dict = generate_unknown_unknown_split('instances_val2017.json', 'task1_uu_test.json', TASK_1_CLASSES, future_for_task1)
+    print("3. Creazione del Test set ufficiale dal Val COCO...")
+    test_dict = generate_unknown_unknown_split(VAL_ANNOTATIONS, 'task1_uu_test.json', TASK_1_CLASSES, future_for_task1)
+    
+    print("\n--- TUTTI I JSON GENERATI CON SUCCESSO! ---")
