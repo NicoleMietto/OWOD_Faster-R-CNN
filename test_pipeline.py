@@ -24,14 +24,14 @@ def main():
     # Sostituire i percorsi quando su Kaggle!
     try:
         train_dataset = OWODDataset(
-            img_dir="path/to/coco/train2017", 
-            annotation_file="path/to/task1_uu_train.json", 
+            img_dir="/kaggle/input/coco-2017-dataset/coco2017/train2017", 
+            annotation_file="task1_uu_train.json", 
             known_classes=[1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
             transform=None
         )
         val_dataset = OWODDataset(
-            img_dir="path/to/coco/train2017", 
-            annotation_file="path/to/task1_uu_val.json", 
+            img_dir="/kaggle/input/coco-2017-dataset/coco2017/train2017", 
+            annotation_file="task1_uu_val.json", 
             known_classes=[1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
             transform=None
         )
