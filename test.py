@@ -30,7 +30,7 @@ def main():
     
     # Nel test, le cartelle delle immagini puntano al val2017 originale di COCO
     test_dataset = OWODDataset(
-        img_dir="path/to/coco/val2017", 
+        img_dir="/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/val2017", 
         annotation_file=test_json_path, 
         known_classes=TASK_1_CLASSES,
         transform=None
