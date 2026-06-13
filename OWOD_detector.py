@@ -4,10 +4,10 @@ import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import roi_align
 
-# Importiamo i moduli che scriveremo nei file separati
-# from labeler import OWOD_Labeler
-# from urm import UnknownBoxRefineModule
-# from etm import EmbeddingTransferModule
+# Importiamo i moduli esterni
+from labeler import OWOD_Labeler
+from urm import UnknownBoxRefineModule
+from etm import EmbeddingTransferModule
 
 class EmbeddingHead(nn.Module):
     """
@@ -84,10 +84,22 @@ class OWODFasterRCNN(nn.Module):
         # 4. Inizializziamo il TUO modulo di Embedding (CNN o MLP)
         self.embedding_head = EmbeddingHead(use_spatial_cnn=use_spatial_cnn)
         
-        # 5. Placeholder per i moduli esterni (li definiremo nei prossimi prompt)
-        # self.labeler = OWOD_Labeler(...)
-        # self.urm = UnknownBoxRefineModule(...)
-        # self.etm = EmbeddingTransferModule(...)
+        # 5. Inizializziamo i moduli esterni
+        self.labeler = OWOD_Labeler()
+        
+        # Download automatico di MobileSAM se non presente
+        import os
+        sam_path = "mobile_sam.pt"
+        if not os.path.exists(sam_path):
+            import urllib.request
+            print("Scaricamento dei pesi di MobileSAM (mobile_sam.pt)...")
+            try:
+                urllib.request.urlretrieve("https://raw.githubusercontent.com/ChaoningZhang/MobileSAM/master/weights/mobile_sam.pt", sam_path)
+            except Exception as e:
+                print(f"Errore download MobileSAM: {e}")
+                
+        self.urm = UnknownBoxRefineModule(sam_checkpoint_path=sam_path, device='cuda' if torch.cuda.is_available() else 'cpu')
+        self.etm = EmbeddingTransferModule()
         
     def forward(self, images, targets=None, dino_features_list=None):
         if self.training:
