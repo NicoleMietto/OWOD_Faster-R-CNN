@@ -109,8 +109,8 @@ if __name__ == "__main__":
 
     # Percorsi di default per Kaggle (se usi "COCO 2017 Dataset" di Awsaf49)
     # Se la tua cartella si chiama diversamente, aggiorna queste variabili:
-    TRAIN_ANNOTATIONS = '/kaggle/input/coco-2017-dataset/coco2017/annotations/instances_train2017.json'
-    VAL_ANNOTATIONS = '/kaggle/input/coco-2017-dataset/coco2017/annotations/instances_val2017.json'
+    TRAIN_ANNOTATIONS = '/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/annotations/instances_train2017.json'
+    VAL_ANNOTATIONS = '/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/annotations/instances_val2017.json'
 
     print("--- Generazione Split Task 1 ---")
     
