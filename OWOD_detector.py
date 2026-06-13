@@ -106,15 +106,6 @@ class OWODFasterRCNN(nn.Module):
             # --- FASE 1: Feature Extraction & RPN ---
             images_list, targets_list = self.detector.transform(images, targets)
             features = self.detector.backbone(images_list.tensors)
-
-            print(self.detector.transform.image_mean)
-            # Output: [0.485, 0.456, 0.406]
-
-            print(self.detector.transform.image_std)
-            # Output: [0.229, 0.224, 0.225]
-
-            print(self.detector.transform.min_size)
-            # Output: (800,) -> Significa che fa il resize del lato corto a 800 pixel
             
             # La RPN genera le proposal grezze (selezione blanda, ne genera migliaia)
             proposals, proposal_losses = self.detector.rpn(images_list, features, targets_list)
@@ -187,7 +178,7 @@ class OWODFasterRCNN(nn.Module):
             # --- FASE 6: RoI Head Standard (Detection Blanda) ---
             # Diamo in pasto TUTTE le proposals della RPN e i target aumentati alla rete base.
             # Lei farà il matching blando (IoU > 0.5 per i positivi) e calcolerà le loss di classificazione e regressione.
-            detector_losses = self.detector.roi_heads(features, proposals, images_list.image_sizes, augmented_targets)
+            detections, detector_losses = self.detector.roi_heads(features, proposals, images_list.image_sizes, augmented_targets)
             
             # Combina tutte le loss
             total_losses = {}
