@@ -89,6 +89,11 @@ def main():
         optimizer.step()
         print("Backward pass successful! (No gradient errors)")
         
+        # Stampa VRAM occupata
+        vram_allocated = torch.cuda.memory_allocated() / (1024 ** 3)
+        vram_reserved = torch.cuda.memory_reserved() / (1024 ** 3)
+        print(f"\n[VRAM USAGE] Allocated: {vram_allocated:.2f} GB | Reserved: {vram_reserved:.2f} GB")
+        
         # Break after the first batch!
         break
 
