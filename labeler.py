@@ -37,39 +37,39 @@ class OWOD_Labeler:
           iou_matrix = ops.box_iou(proposals, gt_boxes)
           
           # ====================================================================
-          # 1. PROSPETTIVA PROPOSALS (Per trovare Unknown e Background)
-          # Per ogni proposal, troviamo la sua IoU massima con qualsiasi GT
+          # 1. PROPOSALS PERSPECTIVE (To find Unknown and Background)
+          # For each proposal, find its maximum IoU with any GT
           # ====================================================================
           max_iou_per_prop, _ = iou_matrix.max(dim=1)
 
-          # Unknown Mask: IoU trascurabile col GT (< iou_unknown_thresh) MA objectness ALTO (sicuramente un oggetto)
+          # Unknown Mask: Negligible IoU with GT (< iou_unknown_thresh) BUT HIGH objectness (definitely an object)
           unknown_mask = (max_iou_per_prop < self.iou_unknown_thresh) & (objectness_scores >= self.objectness_thresh)
 
-          # Background Mask: IoU trascurabile col GT MA objectness BASSO (sicuramente sfondo/muro/cielo)
+          # Background Mask: Negligible IoU with GT AND LOW objectness (likely background/sky/wall)
           background_mask = (max_iou_per_prop < self.iou_unknown_thresh) & (objectness_scores < self.objectness_thresh)
 
-          # Nota: le proposal con (iou_unknown_thresh <= max_iou < iou_known_thresh) 
-          # vengono silenziosamente scartate. Sono "ambigue" e non ci servono per il Representation Learning.
+          # Note: proposals with (iou_unknown_thresh <= max_iou < iou_known_thresh) 
+          # are silently discarded. They are "ambiguous" and not useful for Representation Learning.
 
           # ====================================================================
-          # 2. PROSPETTIVA GROUND TRUTH (Per trovare i Known 1-a-1 / "Hungarian")
-          # Per ogni Ground Truth, troviamo l'indice della MIGLIOR proposal assoluta
+          # 2. GROUND TRUTH PERSPECTIVE (To find 1-to-1 Known matches / "Hungarian")
+          # For each Ground Truth, find the index of the absolute BEST proposal
           # ====================================================================
           best_iou_per_gt, best_prop_idx_per_gt = iou_matrix.max(dim=0)
 
-          # Ci assicuriamo che questa miglior proposal abbia comunque una sovrapposizione decente (> iou_known_thresh)
+          # Ensure that this best proposal has a decent overlap anyway (> iou_known_thresh)
           valid_gt_mask = best_iou_per_gt >= self.iou_known_thresh
 
-          # Estraiamo gli indici delle proposal vincitrici
+          # Extract the indices of the winning proposals
           best_known_indices = best_prop_idx_per_gt[valid_gt_mask]
 
-          # Restituiamo il dizionario con tutto ciò che serve allo script principale
+          # Return the dictionary with everything needed by the main script
           return {
               "known_boxes": proposals[best_known_indices],
-              "known_labels": gt_labels[valid_gt_mask], # Prendiamo i label solo dei GT che hanno trovato un match
+              "known_labels": gt_labels[valid_gt_mask], # Take labels only from GTs that found a match
               
               "unknown_boxes": proposals[unknown_mask],
-              "unknown_scores": objectness_scores[unknown_mask], # AGGIUNTA FONDAMENTALE! Ci servirà per fare la NMS nello script principale
+              "unknown_scores": objectness_scores[unknown_mask], # CRUCIAL ADDITION! Needed for NMS in main script
               
               "background_boxes": proposals[background_mask]
           }

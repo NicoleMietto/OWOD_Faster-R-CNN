@@ -4,22 +4,22 @@ import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import roi_align
 
-# Importiamo i moduli esterni
+# Import external modules
 from labeler import OWOD_Labeler
 from urm import UnknownBoxRefineModule
 from etm import EmbeddingTransferModule
 
 class EmbeddingHead(nn.Module):
     """
-    Questo è il cuore del TUO esperimento. 
-    Prende i riquadri estratti dal RoI-Align (N, 256, 7, 7) e produce gli embeddings Z_i.
+    This is the core of YOUR experiment. 
+    It takes the boxes extracted by RoI-Align (N, 256, 7, 7) and produces the Z_i embeddings.
     """
     def __init__(self, in_channels=256, roi_size=7, embedding_dim=256, use_spatial_cnn=True):
         super().__init__()
         self.use_spatial_cnn = use_spatial_cnn
         
         if self.use_spatial_cnn:
-            # ESPERIMENTO NUOVO: Manteniamo l'info spaziale con una CNN
+            # NEW EXPERIMENT: We maintain spatial info with a CNN
             self.network = nn.Sequential(
                 nn.Conv2d(in_channels, 256, kernel_size=3, padding=1),
                 nn.BatchNorm2d(256),
@@ -27,12 +27,12 @@ class EmbeddingHead(nn.Module):
                 nn.Conv2d(256, 256, kernel_size=3, padding=1),
                 nn.BatchNorm2d(256),
                 nn.ReLU(),
-                nn.AdaptiveAvgPool2d((1, 1)), # Comprime spazialmente solo alla fine
+                nn.AdaptiveAvgPool2d((1, 1)), # Spatially compress only at the end
                 nn.Flatten(),
                 nn.Linear(256, embedding_dim)
             )
         else:
-            # BASELINE (Paper): Appiattisce tutto subito perdendo l'info topologica
+            # BASELINE (Paper): Flattens everything immediately, losing topological info
             self.network = nn.Sequential(
                 nn.Flatten(),
                 nn.Linear(in_channels * roi_size * roi_size, 1024),
@@ -52,65 +52,66 @@ class OWODFasterRCNN(nn.Module):
         self.use_etm = False
         self.use_urm = False
         
-        # 1. Carichiamo Faster R-CNN con ResNet50 pre-addestrata
-        self.detector = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights='DEFAULT')
+        # 1. Load Faster R-CNN with ResNet50 pre-trained ONLY on ImageNet (not COCO!)
+        # It is CRITICAL to use weights=None and weights_backbone='DEFAULT' for Open World.
+        self.detector = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=None, weights_backbone='DEFAULT')
         
-        # 2. FREEZING per Colab/Kaggle: Congeliamo i primi blocchi della ResNet
-        # La ResNet50 in torchvision ha una 'backbone.body'
+        # 2. FREEZING for Colab/Kaggle: Freeze the first blocks of ResNet
+        # torchvision's ResNet50 has a 'backbone.body'
         for name, parameter in self.detector.backbone.body.named_parameters():
-            if 'layer1' in name or 'layer2' in name: # Congeliamo i primi due blocchi
+            if 'layer1' in name or 'layer2' in name: # Freeze the first two blocks
                 parameter.requires_grad = False
                 
-        # 3. Adattiamo il classificatore finale
-        # num_classes totali = background (0) + known_classes + 1 (classe fittizia per gli unknown)
+        # 3. Adapt the final classifier
+        # total num_classes = background (0) + known_classes + 1 (dummy class for unknowns)
         in_features = self.detector.roi_heads.box_predictor.cls_score.in_features
         self.detector.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_known_classes + 2)
 
-        self.rpn_scores = [] # Qui salveremo i punteggi intercettati
+        self.rpn_scores = [] # We will save intercepted scores here
         
-        # Salviamo la funzione originale di PyTorch
+        # Save the original PyTorch function
         original_filter = self.detector.rpn.filter_proposals
         
-        # Creiamo un "Hook" (Gancio)
+        # Create a "Hook"
         def hook_filter_proposals(*args, **kwargs):
-            # Chiamiamo la funzione originale. Restituisce i box e i punteggi!
+            # Call original function. Returns boxes and scores!
             boxes, scores = original_filter(*args, **kwargs)
-            self.rpn_scores = scores # Li rubiamo e li salviamo qui
-            return boxes, scores     # Restituiamo i box a PyTorch come si aspetta
+            self.rpn_scores = scores # Steal them and save them here
+            return boxes, scores     # Return boxes to PyTorch as expected
             
-        # Sostituiamo la funzione di PyTorch con la nostra!
+        # Replace PyTorch's function with ours!
         self.detector.rpn.filter_proposals = hook_filter_proposals
         
-        # 4. Inizializziamo il TUO modulo di Embedding (CNN o MLP)
+        # 4. Initialize YOUR Embedding module (CNN or MLP)
         self.embedding_head = EmbeddingHead(use_spatial_cnn=use_spatial_cnn)
         
-        # 5. Inizializziamo i moduli esterni
+        # 5. Initialize external modules
         self.labeler = OWOD_Labeler()
         
-        # Download automatico di MobileSAM se non presente
+        # Automatic download of MobileSAM if not present
         import os
         sam_path = "mobile_sam.pt"
         if not os.path.exists(sam_path):
             import urllib.request
-            print("Scaricamento dei pesi di MobileSAM (mobile_sam.pt)...")
+            print("Downloading MobileSAM weights (mobile_sam.pt)...")
             try:
                 urllib.request.urlretrieve("https://raw.githubusercontent.com/ChaoningZhang/MobileSAM/master/weights/mobile_sam.pt", sam_path)
             except Exception as e:
-                print(f"Errore download MobileSAM: {e}")
+                print(f"Error downloading MobileSAM: {e}")
                 
         self.urm = UnknownBoxRefineModule(sam_checkpoint_path=sam_path, device='cuda' if torch.cuda.is_available() else 'cpu')
         self.etm = EmbeddingTransferModule()
         
     def forward(self, images, targets=None, dino_features_list=None):
         if self.training:
-            # --- FASE 1: Feature Extraction & RPN ---
+            # --- PHASE 1: Feature Extraction & RPN ---
             images_list, targets_list = self.detector.transform(images, targets)
             features = self.detector.backbone(images_list.tensors)
             
-            # La RPN genera le proposal grezze (selezione blanda, ne genera migliaia)
+            # The RPN generates raw proposals (mild selection, generates thousands)
             proposals, proposal_losses = self.detector.rpn(images_list, features, targets_list)
             
-            # 2. ECCO LA MAGIA: Recuperi gli scores appena rubati dall'hook!
+            # 2. HERE IS THE MAGIC: Retrieve the scores just stolen by the hook!
             objectness_scores = self.rpn_scores
             
             device = images_list.tensors.device
@@ -118,46 +119,46 @@ class OWODFasterRCNN(nn.Module):
             total_loss_et = torch.tensor(0.0, device=device)
             augmented_targets = []
             
-            # Iteriamo per ogni immagine nel batch
+            # Iterate for each image in the batch
             for i in range(len(images)):
-                # 2. Estraiamo la feature map di DINO per questa specifica immagine
+                # 2. Extract DINO feature map for this specific image
                 dino_features_i = dino_features_list[i] if dino_features_list is not None else None
 
                 # --- Pseudo-Labeling ---
                 labels_dict = self.labeler.assign_labels_known_unknown_background(
                     proposals[i], 
-                    objectness_scores[i], # Ora questo funziona perfettamente!
+                    objectness_scores[i], # This works perfectly now!
                     targets_list[i]['boxes'], 
                     targets_list[i]['labels']
                 )
                 
-                # Le PREDIZIONI grezze (imprecise) per i known! (Risposta al tuo dubbio)
+                # Raw (imprecise) PREDICTIONS for knowns! 
                 pred_known_boxes = labels_dict['known_boxes'] 
                 
-                # --- NMS per non sprecare i Top-K (Risposta al tuo dubbio) ---
+                # --- NMS to not waste Top-K ---
                 raw_unknowns = labels_dict['unknown_boxes']
-                unk_scores = labels_dict['unknown_scores'] # Dovrai restituire anche gli scores dal labeler
+                unk_scores = labels_dict['unknown_scores'] # You will also need to return scores from the labeler
                 
-                # Applichiamo NMS tra gli unknown. Se si sovrappongono troppo, tiene solo il migliore.
+                # Apply NMS among unknowns. If they overlap too much, keep only the best.
                 keep_idx = torchvision.ops.nms(raw_unknowns, unk_scores, iou_threshold=0.3)
                 filtered_unknowns = raw_unknowns[keep_idx]
                 
-                # ORA prendiamo i Top-K senza sprechi
+                # NOW we take the Top-K without waste
                 top_k = 10
                 top_unknowns = filtered_unknowns[:top_k]
                 
-                # --- FASE 3: URM (MobileSAM) ---
+                # --- PHASE 3: URM (MobileSAM) ---
                 if self.use_urm:
                     refined_unknowns, loss_b_unk = self.urm(top_unknowns, images_list.tensors[i])
                     total_loss_b_unk = total_loss_b_unk + loss_b_unk
                 else:
                     refined_unknowns = torch.empty((0, 4), device=device)
                 
-                # --- FASE 4: ETM (DINOv2) ---
+                # --- PHASE 4: ETM (DINOv2) ---
                 valid_boxes_for_etm = torch.cat([pred_known_boxes, refined_unknowns])
                 
                 if self.use_etm and len(valid_boxes_for_etm) > 0 and dino_features_i is not None:
-                    # In FPN, features è un OrderedDict. Usiamo la feature map con maggior risoluzione '0'
+                    # In FPN, features is an OrderedDict. We use the highest resolution feature map '0'
                     feat_tensor = features['0'] if isinstance(features, dict) else features
                     roi_features = roi_align(feat_tensor, [valid_boxes_for_etm], output_size=(7, 7), spatial_scale=1/4.0)
                     instance_embeddings = self.embedding_head(roi_features)
@@ -165,9 +166,9 @@ class OWODFasterRCNN(nn.Module):
                     loss_et = self.etm(dino_features_i, [valid_boxes_for_etm], instance_embeddings)
                     total_loss_et = total_loss_et + loss_et
                 
-                # --- FASE 5: Iniezione Target per la RoI Head Blanda ---
-                # Aggiungiamo i riquadri perfezionati da SAM ai Ground Truth dell'immagine.
-                # L'etichetta sarà num_known_classes + 1 (la classe fittizia Unknown)
+                # --- PHASE 5: Target Injection for Mild RoI Head ---
+                # Add SAM-refined boxes to the image's Ground Truths.
+                # The label will be num_known_classes + 1 (the dummy Unknown class)
                 new_target = targets_list[i].copy()
                 if len(refined_unknowns) > 0:
                     new_labels = torch.full((len(refined_unknowns),), self.num_known_classes + 1, dtype=torch.int64, device=refined_unknowns.device)
@@ -175,12 +176,13 @@ class OWODFasterRCNN(nn.Module):
                     new_target['labels'] = torch.cat([new_target['labels'], new_labels])
                 augmented_targets.append(new_target)
 
-            # --- FASE 6: RoI Head Standard (Detection Blanda) ---
-            # Diamo in pasto TUTTE le proposals della RPN e i target aumentati alla rete base.
-            # Lei farà il matching blando (IoU > 0.5 per i positivi) e calcolerà le loss di classificazione e regressione.
+            # --- PHASE 6: Standard RoI Head (Mild Detection) ---
+            # We feed ALL RPN proposals and augmented targets to the base network.
+            # It will do mild matching (IoU > 0.5 for positives) and calculate classification and regression losses.
+            # roi_heads returns (predictions, dict_of_losses)
             detections, detector_losses = self.detector.roi_heads(features, proposals, images_list.image_sizes, augmented_targets)
             
-            # Combina tutte le loss
+            # Combine all losses
             total_losses = {}
             total_losses.update(proposal_losses)
             total_losses.update(detector_losses)

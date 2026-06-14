@@ -18,8 +18,8 @@ class OWODDataset(Dataset):
         self.transform = transform
         self.known_classes = known_classes
         
-        # Mappa le classi originali COCO a ID continui (1, 2, ..., N)
-        # Faster R-CNN si aspetta che background sia 0 e classi da 1 a num_classes
+        # Map original COCO classes to continuous IDs (1, 2, ..., N)
+        # Faster R-CNN expects background to be 0 and classes from 1 to num_classes
         self.category_id_to_continuous_id = {
             cat_id: i + 1 for i, cat_id in enumerate(self.known_classes)
         }
@@ -30,10 +30,10 @@ class OWODDataset(Dataset):
             
         self.images = coco_data['images']
         
-        # Raggruppa annotazioni per image_id
+        # Group annotations by image_id
         self.img_id_to_anns = {img['id']: [] for img in self.images}
         for ann in coco_data['annotations']:
-            # Carichiamo solo annotazioni delle classi conosciute
+            # Load only annotations of known classes
             if ann['category_id'] in self.category_id_to_continuous_id:
                 self.img_id_to_anns[ann['image_id']].append(ann)
                 
@@ -46,29 +46,29 @@ class OWODDataset(Dataset):
         img_info = self.images[idx]
         img_path = os.path.join(self.img_dir, img_info['file_name'])
         
-        # Carica immagine
+        # Load image
         img = Image.open(img_path).convert("RGB")
         
-        # Carica annotazioni
+        # Load annotations
         anns = self.img_id_to_anns[img_info['id']]
         
         boxes = []
         labels = []
         
         for ann in anns:
-            # COCO bbox formato: [x_min, y_min, width, height]
+            # COCO bbox format: [x_min, y_min, width, height]
             x_min, y_min, w, h = ann['bbox']
             
-            # Faster R-CNN formato: [x_min, y_min, x_max, y_max]
+            # Faster R-CNN format: [x_min, y_min, x_max, y_max]
             x_max = x_min + w
             y_max = y_min + h
             
-            # Evitare box degenerati
+            # Avoid degenerate boxes
             if w > 0 and h > 0:
                 boxes.append([x_min, y_min, x_max, y_max])
                 labels.append(self.category_id_to_continuous_id[ann['category_id']])
                 
-        # Converte in tensori
+        # Convert to tensors
         if len(boxes) > 0:
             boxes = torch.as_tensor(boxes, dtype=torch.float32)
             labels = torch.as_tensor(labels, dtype=torch.int64)
@@ -81,11 +81,11 @@ class OWODDataset(Dataset):
         target["labels"] = labels
         target["image_id"] = torch.tensor([img_info['id']])
         
-        # Trasformazione immagine in tensore
+        # Transform image to tensor
         img_tensor = TF.to_tensor(img)
         
         if self.transform is not None:
-            # Assicurarsi che le transform supportino la logica bounding box se usate
+            # Ensure transforms support bounding box logic if used
             img_tensor, target = self.transform(img_tensor, target)
             
         return img_tensor, target

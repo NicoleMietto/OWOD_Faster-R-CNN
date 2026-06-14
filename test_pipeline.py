@@ -11,9 +11,9 @@ def collate_fn(batch):
 
 def main():
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    print(f"=== TEST PIPELINE INIZIALE su {device} ===")
+    print(f"=== INITIAL PIPELINE TEST on {device} ===")
 
-    print("Caricamento DINOv2 (ViT-Small)...")
+    print("Loading DINOv2 (ViT-Small)...")
     dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14')
     dinov2 = dinov2.to(device)
     dinov2.eval()
@@ -21,7 +21,7 @@ def main():
         param.requires_grad = False
 
     print("Setup Datasets...")
-    # Sostituire i percorsi quando su Kaggle!
+    # Paths configured for Kaggle environment
     try:
         train_dataset = OWODDataset(
             img_dir="/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/train2017", 
@@ -36,32 +36,32 @@ def main():
             transform=None
         )
     except FileNotFoundError:
-        print("ATTENZIONE: File JSON non trovati. Assicurati di generare gli split e inserire i path corretti!")
+        print("WARNING: JSON files not found. Make sure you generated the splits and provided correct paths!")
         return
 
     train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False, collate_fn=collate_fn)
 
-    print("Inizializzazione Modello OWOD...")
+    print("Initializing OWOD Model...")
     model = OWODFasterRCNN(num_known_classes=20, use_spatial_cnn=True).to(device)
     
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=1e-4)
 
-    # Forziamo subito tutti i moduli a True per testare se la memoria regge o se ci sono errori logici
+    # Force all modules to True immediately to test memory limits and logic errors
     model.use_etm = True
     model.use_urm = True
-    print(f"Moduli attivati: ETM={model.use_etm}, URM={model.use_urm}")
+    print(f"Active modules: ETM={model.use_etm}, URM={model.use_urm}")
 
     model.train()
     
-    # Eseguiamo solo UN batch (2 immagini) per testare il forward, i moduli e il backward pass
-    print("\n--- TEST: ITERAZIONE DI TRAINING (1 Batch) ---")
+    # Run only ONE batch (2 images) to test forward, modules, and backward pass
+    print("\n--- TEST: TRAINING ITERATION (1 Batch) ---")
     for i, (images, targets) in enumerate(train_loader):
         images = [img.to(device) for img in images]
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
         
-        # DINO
+        # DINO feature extraction
         dino_features_list = []
         with torch.no_grad():
             for img in images:
@@ -77,8 +77,8 @@ def main():
         loss_dict = model(images, targets, dino_features_list)
         losses = sum(loss for loss in loss_dict.values())
         
-        print(f"Loss calcolata con successo: {losses.item():.4f}")
-        print("Dettaglio Loss:")
+        print(f"Loss successfully calculated: {losses.item():.4f}")
+        print("Loss Details:")
         for k, v in loss_dict.items():
             print(f"  - {k}: {v.item():.4f}")
         
@@ -87,12 +87,12 @@ def main():
         losses.backward()
         torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
         optimizer.step()
-        print("Backward pass eseguito con successo! (Nessun errore sui gradienti)")
+        print("Backward pass successful! (No gradient errors)")
         
-        # Interrompiamo dopo il primo batch!
+        # Break after the first batch!
         break
 
-    print("\n--- TEST: ITERAZIONE DI VALIDAZIONE (1 Batch) ---")
+    print("\n--- TEST: VALIDATION ITERATION (1 Batch) ---")
     with torch.no_grad():
         for i, (images, targets) in enumerate(val_loader):
             images = [img.to(device) for img in images]
@@ -110,10 +110,10 @@ def main():
                 
             loss_dict = model(images, targets, val_dino_features)
             val_loss = sum(loss for loss in loss_dict.values())
-            print(f"Validation Forward eseguito con successo. Loss: {val_loss.item():.4f}")
+            print(f"Validation Forward successful. Loss: {val_loss.item():.4f}")
             break
             
-    print("\n=== TEST COMPLETATO CON SUCCESSO! IL MODELLO È PRONTO PER L'ADDESTRAMENTO ===")
+    print("\n=== TEST COMPLETED SUCCESSFULLY! THE MODEL IS READY FOR TRAINING ===")
 
 if __name__ == "__main__":
     main()
