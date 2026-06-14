@@ -65,10 +65,15 @@ def generate_unknown_unknown_split(coco_path, output_path, known_classes, future
     
     return new_coco
 
-def split_and_save(coco_dict, output_train, output_val, split_ratio=0.9):
+def split_and_save(coco_dict, output_train, output_val, split_ratio=0.9, subsample_ratio=0.3):
     images = coco_dict['images']
     random.shuffle(images) # Shuffle randomly
     
+    if subsample_ratio < 1.0:
+        keep_amount = int(len(images) * subsample_ratio)
+        images = images[:keep_amount]
+        print(f"*** SUBSAMPLING APPLIED: Reduced dataset to {keep_amount} images ({subsample_ratio*100}%) ***")
+        
     split_idx = int(len(images) * split_ratio)
     train_images = images[:split_idx]
     val_images = images[split_idx:]
@@ -116,14 +121,14 @@ if __name__ == "__main__":
     
     # 1. Generate master dataset from COCO original training
     print("1. Creating master split (Unknown-Unknown) from COCO Train...")
-    master_dict = generate_unknown_unknown_split(TRAIN_ANNOTATIONS, 'task1_uu_master.json', TASK_1_CLASSES, future_for_task1)
+    master_dict = generate_unknown_unknown_split(TRAIN_ANNOTATIONS, '/kaggle/working/task1_uu_master.json', TASK_1_CLASSES, future_for_task1)
     
     # 2. Divide into 90% Train and 10% Val for Early Stopping
     print("2. Splitting into Train (90%) and Validation (10%) for Early Stopping...")
-    split_and_save(master_dict, 'task1_uu_train.json', 'task1_uu_val.json', split_ratio=0.9)
+    split_and_save(master_dict, '/kaggle/working/task1_uu_train.json', '/kaggle/working/task1_uu_val.json', split_ratio=0.9, subsample_ratio=0.3)
     
     # 3. Generate Test Set (using COCO original val2017)
     print("3. Creating official Test set from COCO Val...")
-    test_dict = generate_unknown_unknown_split(VAL_ANNOTATIONS, 'task1_uu_test.json', TASK_1_CLASSES, future_for_task1)
+    test_dict = generate_unknown_unknown_split(VAL_ANNOTATIONS, '/kaggle/working/task1_uu_test.json', TASK_1_CLASSES, future_for_task1)
     
-    print("\n--- ALL JSON FILES GENERATED SUCCESSFULLY! ---")
+    print("\n--- ALL JSON FILES GENERATED SUCCESSFULLY IN /kaggle/working/ ! ---")

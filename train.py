@@ -47,24 +47,24 @@ def main():
         param.requires_grad = False
 
     # ==========================================
-    # 3. Dataset and DataLoader Setup
+    # 3. Dataset Setup (Task 1)
     # ==========================================
     train_dataset = OWODDataset(
         img_dir="/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/train2017", 
-        annotation_file="task1_uu_train.json", 
+        annotation_file="/kaggle/working/task1_uu_train.json", 
         known_classes=[1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
         transform=None 
     )
     val_dataset = OWODDataset(
         img_dir="/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/train2017", 
-        annotation_file="task1_uu_val.json", 
+        annotation_file="/kaggle/working/task1_uu_val.json", 
         known_classes=[1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
         transform=None
     )
     
-    # Low batch size (e.g., 2 or 4) due to the models weight on free GPUs
-    train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False, collate_fn=collate_fn)
+    # Increase batch size to 4 to speed up training if VRAM allows
+    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn)
 
     # ==========================================
     # 4. OWOD Network and Optimizer Initialization
@@ -80,7 +80,7 @@ def main():
     # ==========================================
     # 5. RESUME FROM CHECKPOINT AND CSV LOGGING
     # ==========================================
-    num_epochs = 20
+    num_epochs = 12
     start_epoch = 0
     best_val_loss = float('inf')
     patience = 5
