@@ -109,8 +109,8 @@ if __name__ == "__main__":
 
     # Default paths for Kaggle (if using "COCO 2017 Dataset" by Awsaf49)
     # Update these variables if your folder has a different name:
-    TRAIN_ANNOTATIONS = '/kaggle/input/coco-2017-dataset/coco2017/annotations/instances_train2017.json'
-    VAL_ANNOTATIONS = '/kaggle/input/coco-2017-dataset/coco2017/annotations/instances_val2017.json'
+    TRAIN_ANNOTATIONS = '/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/annotations/instances_train2017.json'
+    VAL_ANNOTATIONS = '/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/annotations/instances_val2017.json'
 
     print("--- Generating Task 1 Splits ---")
     
