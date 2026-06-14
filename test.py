@@ -20,8 +20,8 @@ def main():
     # ==========================================
     # 2. Test Dataset Setup
     # ==========================================
-    # We assume 'task1_uu_test.json' has been generated in /kaggle/working/
-    test_json_path = "/kaggle/working/task1_uu_test.json"
+    # We assume 'task1_uu_test.json' has been generated
+    test_json_path = "task1_uu_test.json"
     
     # Task 1 classes (same as train.py)
     TASK_1_CLASSES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
