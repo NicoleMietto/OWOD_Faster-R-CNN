@@ -39,8 +39,8 @@ def main():
         print("WARNING: JSON files not found. Make sure you generated the splits and provided correct paths!")
         return
 
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False, collate_fn=collate_fn)
+    train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False, collate_fn=collate_fn)
 
     print("Initializing OWOD Model...")
     model = OWODFasterRCNN(num_known_classes=20, use_spatial_cnn=True).to(device)

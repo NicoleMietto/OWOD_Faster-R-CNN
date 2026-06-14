@@ -62,7 +62,7 @@ def main():
         transform=None
     )
     
-    # Increase batch size to 4 to speed up training if VRAM allows
+    # Batch size set to 4 to prevent Out of Memory (OOM) errors during training spikes
     train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn)
 
