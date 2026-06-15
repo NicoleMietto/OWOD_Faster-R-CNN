@@ -119,10 +119,18 @@ def main():
             model.use_etm = True
             model.use_urm = True
             
+        # Reset Early Stopping when a new module is activated to prevent unfair loss comparisons
+        if epoch == 4 or epoch == 8:
+            print(f"--> New module activated at Epoch {epoch+1}. Resetting Early Stopping patience and best loss!")
+            best_val_loss = float('inf')
+            patience_counter = 0
+            
         print(f"Epoch {epoch+1} - Configuration: ETM={model.use_etm}, URM={model.use_urm}")
 
         model.train()
         total_loss = 0
+        total_loss_b_unk = 0
+        total_loss_et = 0
         
         loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
         
@@ -168,19 +176,31 @@ def main():
             
             optimizer.step()
             
+            # Print periodically to force Kaggle to update the background logs
+            if i % 100 == 0 and i > 0:
+                print(f"  -> Batch {i}/{len(train_loader)} | Current Loss: {loss_dict['loss_classifier'].item():.4f}", flush=True)
+            
             total_loss += losses.item()
+            if 'loss_b_unk' in loss_dict:
+                total_loss_b_unk += loss_dict['loss_b_unk'].item()
+            if 'loss_et' in loss_dict:
+                total_loss_et += loss_dict['loss_et'].item()
+                
             loop.set_postfix(loss=losses.item())
             
         train_loss_avg = total_loss / len(train_loader)
-        print(f"End of Epoch {epoch+1} - Avg Train Loss: {train_loss_avg:.4f}")
+        avg_b_unk = total_loss_b_unk / len(train_loader)
+        avg_et = total_loss_et / len(train_loader)
+        print(f"End of Epoch {epoch+1} - Avg Train Loss: {train_loss_avg:.4f} (ET: {avg_et:.4f}, URM: {avg_b_unk:.4f})")
         
         # ==========================================
         # VALIDATION LOOP
         # ==========================================
-        # model is in train() mode, necessary for Faster R-CNN to return losses.
-        # We use torch.no_grad() to avoid building the graph.
+        # PyTorch Faster R-CNN only returns losses when model.train() is active.
+        # We use torch.no_grad() to ensure weights are not updated.
+        model.train()
         val_loss_total = 0.0
-        val_loop = tqdm(val_loader, desc=f"Val {epoch+1}/{num_epochs}")
+        val_loop = tqdm(val_loader, desc="Validation")
         
         with torch.no_grad():
             for images, targets in val_loop:
@@ -211,9 +231,7 @@ def main():
         # Write to CSV file
         with open(csv_file, mode='a', newline='') as f:
             writer = csv.writer(f)
-            # Log the losses. Note: extracting exact loss_b_unk and loss_et requires 
-            # accumulating them in the train loop, for simplicity we save the CSV state here.
-            writer.writerow([epoch+1, f"{train_loss_avg:.4f}", f"{val_loss_avg:.4f}", "", ""])
+            writer.writerow([epoch+1, f"{train_loss_avg:.4f}", f"{val_loss_avg:.4f}", f"{avg_b_unk:.4f}", f"{avg_et:.4f}"])
             
         # Save current epoch state for Resume capability
         checkpoint = {

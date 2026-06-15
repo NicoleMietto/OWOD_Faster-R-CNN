@@ -75,19 +75,28 @@ class UnknownBoxRefineModule(nn.Module):
         # 'masks' has dimension [K, 1, H, W]
         
         # --- STEP 3: Generation of New Bounding Boxes ---
-        # Remove the channel dimension (masks[:, 0]) and convert from boolean mask to box
-        sam_boxes = ops.masks_to_boxes(masks[:, 0])
+        # A mask might be completely empty (SAM didn't find anything).
+        # masks_to_boxes crashes on empty masks. We must filter them first.
+        mask_bool = masks[:, 0]
+        valid_mask_idx = mask_bool.view(mask_bool.shape[0], -1).any(dim=1)
+        
+        if not valid_mask_idx.any():
+            return torch.empty((0, 4), device=self.device), torch.tensor(0.0, device=self.device, requires_grad=True)
+            
+        valid_masks = mask_bool[valid_mask_idx]
+        sam_boxes = ops.masks_to_boxes(valid_masks)
+        top_unknown_boxes_filtered = top_unknown_boxes[valid_mask_idx]
         
         # --- STEP 4: Hallucination Filtering ---
         # Calculate the IoU between original RPN proposals and perfect SAM masks.
         # ops.box_iou returns a KxK matrix. We are only interested in the diagonal
         # (i.e. the match between RPN box N and SAM box N).
-        ious = ops.box_iou(top_unknown_boxes, sam_boxes).diag()
+        ious = ops.box_iou(top_unknown_boxes_filtered, sam_boxes).diag()
         
         # Keep only those where SAM confirmed RPN's intuition
         keep_mask = ious >= self.iou_filter_thresh
         
-        valid_proposals = top_unknown_boxes[keep_mask]
+        valid_proposals = top_unknown_boxes_filtered[keep_mask]
         valid_sam_boxes = sam_boxes[keep_mask].detach() # These are now "Ground Truth", detach() is applied!
         
         if len(valid_sam_boxes) == 0:
