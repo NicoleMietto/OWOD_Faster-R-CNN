@@ -18,8 +18,15 @@ def main():
     checkpoint_path = "/kaggle/working/OWOD_Faster-R-CNN/best_model.pth"
     try:
         checkpoint = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print(f"Model loaded successfully from Epoch {checkpoint['epoch']+1}")
+        
+        # Se ha 'model_state_dict', è il file "last". Altrimenti è il file "best" (che è solo i pesi)
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print(f"Model loaded successfully from Epoch {checkpoint.get('epoch', 0)+1} (Last Checkpoint)")
+        else:
+            model.load_state_dict(checkpoint)
+            print("Model loaded successfully from Best Checkpoint format")
+            
     except Exception as e:
         print(f"Error loading checkpoint. Did you put the weights in the right place? {e}")
         return
@@ -27,13 +34,13 @@ def main():
     model.to(device)
     model.eval() # Imposta la modalità di inferenza
     
-    # 2. Pick a random image from validation set
-    val_json_path = "/kaggle/working/task1_uu_val.json"
-    with open(val_json_path, 'r') as f:
+    # 2. Pick a random image from TEST set
+    test_json_path = "/kaggle/working/task1_uu_test.json"
+    with open(test_json_path, 'r') as f:
         coco_data = json.load(f)
         
     img_info = random.choice(coco_data['images'])
-    # Le immagini di COCO 2017 train sono tutte lì
+    # Le immagini del test set (Task 1) provengono dalla cartella val2017 originale di COCO
     img_path = f"/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/val2017/{img_info['file_name']}"
     
     print(f"Testing on image: {img_path}")
