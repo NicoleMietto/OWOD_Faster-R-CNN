@@ -134,7 +134,7 @@ def main():
         
         loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
         
-        for images, targets in loop:
+        for i, (images, targets) in enumerate(loop):
             # Move images and targets to GPU
             images = [img.to(device) for img in images]
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -175,10 +175,6 @@ def main():
             torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
             
             optimizer.step()
-            
-            # Print periodically to force Kaggle to update the background logs
-            if i % 100 == 0 and i > 0:
-                print(f"  -> Batch {i}/{len(train_loader)} | Current Loss: {loss_dict['loss_classifier'].item():.4f}", flush=True)
             
             total_loss += losses.item()
             if 'loss_b_unk' in loss_dict:
