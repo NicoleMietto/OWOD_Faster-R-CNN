@@ -15,7 +15,7 @@ def main():
     num_known_classes = 20
     model = OWODFasterRCNN(num_known_classes=num_known_classes)
     
-    checkpoint_path = "/kaggle/working/OWOD_Faster-R-CNN/owod_model_last.pth"
+    checkpoint_path = "/kaggle/working/OWOD_Faster-R-CNN/best_model.pth"
     try:
         checkpoint = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -34,7 +34,7 @@ def main():
         
     img_info = random.choice(coco_data['images'])
     # Le immagini di COCO 2017 train sono tutte lì
-    img_path = f"/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/train2017/{img_info['file_name']}"
+    img_path = f"/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/val2017/{img_info['file_name']}"
     
     print(f"Testing on image: {img_path}")
     image = Image.open(img_path).convert("RGB")
