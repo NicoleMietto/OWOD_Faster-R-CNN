@@ -102,7 +102,11 @@ def main():
     with open(csv_file, mode='a', newline='') as f:
         writer = csv.writer(f)
         if write_header:
-            writer.writerow(['Epoch', 'Train_Loss', 'Val_Loss', 'Train_Loss_b_unk', 'Train_Loss_et'])
+            writer.writerow([
+                'Epoch', 
+                'Train_Total', 'Train_Cls', 'Train_BoxReg', 'Train_Obj', 'Train_RPNBoxReg', 'Train_b_unk', 'Train_et',
+                'Val_Total', 'Val_Cls', 'Val_BoxReg', 'Val_Obj', 'Val_RPNBoxReg', 'Val_b_unk', 'Val_et'
+            ])
 
     # ==========================================
     # 6. TRAINING LOOP AND EARLY STOPPING
@@ -128,9 +132,10 @@ def main():
         print(f"Epoch {epoch+1} - Configuration: ETM={model.use_etm}, URM={model.use_urm}")
 
         model.train()
-        total_loss = 0
-        total_loss_b_unk = 0
-        total_loss_et = 0
+        # Initialize dictionaries to keep track of individual losses
+        train_loss_sums = {'total': 0.0, 'loss_classifier': 0.0, 'loss_box_reg': 0.0, 
+                           'loss_objectness': 0.0, 'loss_rpn_box_reg': 0.0, 
+                           'loss_b_unk': 0.0, 'loss_et': 0.0}
         
         loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
         
@@ -176,18 +181,18 @@ def main():
             
             optimizer.step()
             
-            total_loss += losses.item()
-            if 'loss_b_unk' in loss_dict:
-                total_loss_b_unk += loss_dict['loss_b_unk'].item()
-            if 'loss_et' in loss_dict:
-                total_loss_et += loss_dict['loss_et'].item()
+            # Accumulate individual losses
+            train_loss_sums['total'] += losses.item()
+            for k, v in loss_dict.items():
+                if k in train_loss_sums:
+                    train_loss_sums[k] += v.item()
                 
             loop.set_postfix(loss=losses.item())
             
-        train_loss_avg = total_loss / len(train_loader)
-        avg_b_unk = total_loss_b_unk / len(train_loader)
-        avg_et = total_loss_et / len(train_loader)
-        print(f"End of Epoch {epoch+1} - Avg Train Loss: {train_loss_avg:.4f} (ET: {avg_et:.4f}, URM: {avg_b_unk:.4f})")
+        # Calculate averages for training
+        num_batches_train = len(train_loader)
+        train_avg = {k: v / num_batches_train for k, v in train_loss_sums.items()}
+        print(f"End of Epoch {epoch+1} - Train Loss: {train_avg['total']:.4f} (Cls: {train_avg['loss_classifier']:.4f}, Obj: {train_avg['loss_objectness']:.4f}, URM: {train_avg['loss_b_unk']:.4f}, ET: {train_avg['loss_et']:.4f})")
         
         # ==========================================
         # VALIDATION LOOP
@@ -195,7 +200,9 @@ def main():
         # PyTorch Faster R-CNN only returns losses when model.train() is active.
         # We use torch.no_grad() to ensure weights are not updated.
         model.train()
-        val_loss_total = 0.0
+        val_loss_sums = {'total': 0.0, 'loss_classifier': 0.0, 'loss_box_reg': 0.0, 
+                         'loss_objectness': 0.0, 'loss_rpn_box_reg': 0.0, 
+                         'loss_b_unk': 0.0, 'loss_et': 0.0}
         val_loop = tqdm(val_loader, desc="Validation")
         
         with torch.no_grad():
@@ -218,16 +225,29 @@ def main():
                 
                 loss_dict = model(images, targets, val_dino_features)
                 losses = sum(loss for loss in loss_dict.values())
-                val_loss_total += losses.item()
+                
+                val_loss_sums['total'] += losses.item()
+                for k, v in loss_dict.items():
+                    if k in val_loss_sums:
+                        val_loss_sums[k] += v.item()
+                        
                 val_loop.set_postfix(val_loss=losses.item())
                 
-        val_loss_avg = val_loss_total / len(val_loader)
-        print(f"Epoch {epoch+1} - Avg Val Loss: {val_loss_avg:.4f}")
+        # Calculate averages for validation
+        num_batches_val = len(val_loader)
+        val_avg = {k: v / num_batches_val for k, v in val_loss_sums.items()}
+        print(f"Epoch {epoch+1} - Val Loss: {val_avg['total']:.4f}")
         
         # Write to CSV file
         with open(csv_file, mode='a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([epoch+1, f"{train_loss_avg:.4f}", f"{val_loss_avg:.4f}", f"{avg_b_unk:.4f}", f"{avg_et:.4f}"])
+            writer.writerow([
+                epoch+1, 
+                f"{train_avg['total']:.4f}", f"{train_avg['loss_classifier']:.4f}", f"{train_avg['loss_box_reg']:.4f}", 
+                f"{train_avg['loss_objectness']:.4f}", f"{train_avg['loss_rpn_box_reg']:.4f}", f"{train_avg['loss_b_unk']:.4f}", f"{train_avg['loss_et']:.4f}",
+                f"{val_avg['total']:.4f}", f"{val_avg['loss_classifier']:.4f}", f"{val_avg['loss_box_reg']:.4f}", 
+                f"{val_avg['loss_objectness']:.4f}", f"{val_avg['loss_rpn_box_reg']:.4f}", f"{val_avg['loss_b_unk']:.4f}", f"{val_avg['loss_et']:.4f}"
+            ])
             
         # Save current epoch state for Resume capability
         checkpoint = {
@@ -238,11 +258,14 @@ def main():
         }
         torch.save(checkpoint, "owod_model_last.pth")
         
+        # Save model for this specific epoch
+        torch.save(checkpoint, f"owod_model_epoch_{epoch+1}.pth")
+        
         # EARLY STOPPING LOGIC
-        if val_loss_avg < best_val_loss:
-            best_val_loss = val_loss_avg
+        if val_avg['total'] < best_val_loss:
+            best_val_loss = val_avg['total']
             patience_counter = 0
-            print(f"New best model found! (Val Loss: {val_loss_avg:.4f}). Saving...")
+            print(f"New best model found! (Val Loss: {val_avg['total']:.4f}). Saving...")
             torch.save(model.state_dict(), "best_model.pth")
         else:
             patience_counter += 1
