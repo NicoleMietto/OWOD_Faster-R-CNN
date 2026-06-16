@@ -62,10 +62,10 @@ def main():
         transform=None
     )
     
-    # Batch size set to 4 to prevent Out of Memory (OOM) errors during training spikes
+    # Batch size aumentato a 8 (grazie alla RAM del cluster e alla Mezza Precisione)
     # num_workers=4 e pin_memory=True sono FONDAMENTALI per velocizzare il caricamento sul Cluster
-    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, collate_fn=collate_fn, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=True)
 
     # ==========================================
     # 4. OWOD Network and Optimizer Initialization
@@ -81,7 +81,7 @@ def main():
     # ==========================================
     # 5. RESUME FROM CHECKPOINT AND CSV LOGGING
     # ==========================================
-    num_epochs = 15
+    num_epochs = 12
     start_epoch = 0
     best_val_loss = float('inf')
     patience = 5
@@ -112,19 +112,21 @@ def main():
     # ==========================================
     # 6. TRAINING LOOP 
     # ==========================================
+    scaler = torch.cuda.amp.GradScaler() # Mezza precisione (AMP) per risparmiare VRAM e velocizzare
+    
     for epoch in range(start_epoch, num_epochs):
-        # FAST SCHEDULE (15 EPOCHS) - Anticipato come richiesto
+        # 12 EPOCHS SCHEDULE (Adatto per ~6000 immagini per evitare overfitting)
         if epoch < 4:
             model.use_etm = False
             model.use_urm = False
-        elif epoch < 6:
+        elif epoch < 7:
             model.use_etm = True
             model.use_urm = False
         else:
             model.use_etm = True
             model.use_urm = True
             
-        if epoch == 4 or epoch == 6:
+        if epoch == 4 or epoch == 7:
             print(f"--> New module activated at Epoch {epoch+1}. Resetting best loss tracking!")
             best_val_loss = float('inf')
             patience_counter = 0
@@ -165,21 +167,21 @@ def main():
                         dino_2d = patch_tokens.permute(0, 2, 1).reshape(1, C, new_h // 14, new_w // 14)
                         dino_features_list.append(dino_2d)
                     
-            # --- OWOD FORWARD PASS ---
-            # Pass images, targets and DINO feature list to our detector
-            loss_dict = model(images, targets, dino_features_list)
+            # --- OWOD FORWARD PASS CON MEZZA PRECISIONE (AMP) ---
+            with torch.cuda.amp.autocast():
+                loss_dict = model(images, targets, dino_features_list)
+                losses = sum(loss for loss in loss_dict.values())
             
-            # Sum all losses (RPN, RoI, L_b_unk, L_et)
-            losses = sum(loss for loss in loss_dict.values())
-            
-            # --- BACKPROPAGATION ---
+            # --- BACKPROPAGATION CON SCALER E CLIPPING ---
             optimizer.zero_grad()
-            losses.backward()
+            scaler.scale(losses).backward()
             
-            # Gradient Clipping (Prevents mathematical explosions if SAM/DINO output anomalies initially)
+            # Unscale prima del gradient clipping
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
             
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             
             # Accumulate individual losses
             train_loss_sums['total'] += losses.item()
@@ -223,8 +225,9 @@ def main():
                         dino_2d = patch_tokens.permute(0, 2, 1).reshape(1, C, new_h // 14, new_w // 14)
                         val_dino_features.append(dino_2d)
                 
-                loss_dict = model(images, targets, val_dino_features)
-                losses = sum(loss for loss in loss_dict.values())
+                with torch.cuda.amp.autocast():
+                    loss_dict = model(images, targets, val_dino_features)
+                    losses = sum(loss for loss in loss_dict.values())
                 
                 val_loss_sums['total'] += losses.item()
                 for k, v in loss_dict.items():

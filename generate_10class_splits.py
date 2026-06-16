@@ -103,8 +103,8 @@ if __name__ == "__main__":
     
     master_dict = generate_unknown_unknown_split(TRAIN_ANNOTATIONS, '/kaggle/working/task1_10cls_uu_master.json', TASK_1_CLASSES, future_for_task1)
     
-    # QUI PUOI CAMBIARE IL SUBSAMPLE RATIO DOPO AVER VISTO QUANTE IMMAGINI CI SONO IN TOTALE (ORA È 1.0 = 100%)
-    split_and_save(master_dict, '/kaggle/working/task1_10cls_uu_train.json', '/kaggle/working/task1_10cls_uu_val.json', split_ratio=0.9, subsample_ratio=1.0)
+    # Impostato a 0.5 per ottenere circa 6000 immagini (il 50% di 12420)
+    split_and_save(master_dict, '/kaggle/working/task1_10cls_uu_train.json', '/kaggle/working/task1_10cls_uu_val.json', split_ratio=0.9, subsample_ratio=0.5)
     
     test_dict = generate_unknown_unknown_split(VAL_ANNOTATIONS, '/kaggle/working/task1_10cls_uu_test.json', TASK_1_CLASSES, future_for_task1)
     
