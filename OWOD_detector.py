@@ -3,6 +3,7 @@ import torch.nn as nn
 import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import roi_align
+import torch.nn.functional as F
 
 # Import external modules
 from labeler import OWOD_Labeler
