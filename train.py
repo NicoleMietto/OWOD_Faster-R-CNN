@@ -51,14 +51,14 @@ def main():
     # ==========================================
     train_dataset = OWODDataset(
         img_dir="/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/train2017", 
-        annotation_file="/kaggle/working/task1_uu_train.json", 
-        known_classes=[1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
+        annotation_file="/kaggle/working/task1_10cls_uu_train.json", 
+        known_classes=[1, 2, 3, 4, 5, 6, 7, 8, 9, 15],
         transform=None 
     )
     val_dataset = OWODDataset(
         img_dir="/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/train2017", 
-        annotation_file="/kaggle/working/task1_uu_val.json", 
-        known_classes=[1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],
+        annotation_file="/kaggle/working/task1_10cls_uu_val.json", 
+        known_classes=[1, 2, 3, 4, 5, 6, 7, 8, 9, 15],
         transform=None
     )
     
@@ -69,9 +69,9 @@ def main():
     # ==========================================
     # 4. OWOD Network and Optimizer Initialization
     # ==========================================
-    # Num classes = 20 known (background and dummy class are handled internally)
+    # Num classes = 10 known (background and dummy class are handled internally)
     # Choose use_spatial_cnn=True for your CNN approach, or False for Paper's MLP
-    model = OWODFasterRCNN(num_known_classes=20, use_spatial_cnn=True).to(device)
+    model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True).to(device)
     
     # Optimizer (AdamW is standard for modern networks. We only train required parameters)
     params = [p for p in model.parameters() if p.requires_grad]
@@ -80,7 +80,7 @@ def main():
     # ==========================================
     # 5. RESUME FROM CHECKPOINT AND CSV LOGGING
     # ==========================================
-    num_epochs = 12
+    num_epochs = 15
     start_epoch = 0
     best_val_loss = float('inf')
     patience = 5
@@ -109,23 +109,22 @@ def main():
             ])
 
     # ==========================================
-    # 6. TRAINING LOOP AND EARLY STOPPING
+    # 6. TRAINING LOOP 
     # ==========================================
     for epoch in range(start_epoch, num_epochs):
-        # --- WARM-UP STRATEGY (progressive module activation) ---
+        # FAST SCHEDULE (15 EPOCHS) - Anticipato come richiesto
         if epoch < 4:
             model.use_etm = False
             model.use_urm = False
-        elif epoch < 8:
+        elif epoch < 6:
             model.use_etm = True
             model.use_urm = False
         else:
             model.use_etm = True
             model.use_urm = True
             
-        # Reset Early Stopping when a new module is activated to prevent unfair loss comparisons
-        if epoch == 4 or epoch == 8:
-            print(f"--> New module activated at Epoch {epoch+1}. Resetting Early Stopping patience and best loss!")
+        if epoch == 4 or epoch == 6:
+            print(f"--> New module activated at Epoch {epoch+1}. Resetting best loss tracking!")
             best_val_loss = float('inf')
             patience_counter = 0
             
