@@ -63,8 +63,9 @@ def main():
     )
     
     # Batch size set to 4 to prevent Out of Memory (OOM) errors during training spikes
-    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn)
+    # num_workers=4 e pin_memory=True sono FONDAMENTALI per velocizzare il caricamento sul Cluster
+    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=True)
 
     # ==========================================
     # 4. OWOD Network and Optimizer Initialization
