@@ -4,6 +4,13 @@ import torch.nn.functional as F
 import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import roi_align
+from torchvision.models.detection.rpn import RegionProposalNetwork
+
+class CustomRPN(RegionProposalNetwork):
+    def filter_proposals(self, proposals, objectness, image_shapes, num_anchors_per_level):
+        boxes, scores = super().filter_proposals(proposals, objectness, image_shapes, num_anchors_per_level)
+        self.rpn_scores = scores
+        return boxes, scores
 
 # Import external modules
 from labeler import OWOD_Labeler
@@ -69,20 +76,11 @@ class OWODFasterRCNN(nn.Module):
         in_features = self.detector.roi_heads.box_predictor.cls_score.in_features
         self.detector.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_known_classes + 1)
 
-        self.rpn_scores = [] # We will save intercepted scores here
-        
-        # Save the original PyTorch function
-        original_filter = self.detector.rpn.filter_proposals
-        
-        # Create a "Hook"
-        def hook_filter_proposals(*args, **kwargs):
-            # Call original function. Returns boxes and scores!
-            boxes, scores = original_filter(*args, **kwargs)
-            self.rpn_scores = scores # Steal them and save them here
-            return boxes, scores     # Return boxes to PyTorch as expected
-            
-        # Replace PyTorch's function with ours!
-        self.detector.rpn.filter_proposals = hook_filter_proposals
+        # 3. MAGIC TRICK: Capture RPN objectness scores
+        # We change the class of the existing RPN to our CustomRPN dynamically.
+        # This safely survives DataParallel deepcopying without closure bugs!
+        self.detector.rpn.__class__ = CustomRPN
+        self.detector.rpn.rpn_scores = []
         
         # 4. Initialize YOUR Embedding module (CNN or MLP)
         self.embedding_head = EmbeddingHead(use_spatial_cnn=use_spatial_cnn)
@@ -113,8 +111,8 @@ class OWODFasterRCNN(nn.Module):
             # The RPN generates raw proposals (mild selection, generates thousands)
             proposals, proposal_losses = self.detector.rpn(images_list, features, targets_list)
             
-            # 2. HERE IS THE MAGIC: Retrieve the scores just stolen by the hook!
-            objectness_scores = self.rpn_scores
+            # 2. HERE IS THE MAGIC: Retrieve the scores just stolen by the CustomRPN!
+            objectness_scores = self.detector.rpn.rpn_scores
             
             device = images_list.tensors.device
             total_loss_b_unk = torch.tensor(0.0, device=device)
@@ -212,8 +210,8 @@ class OWODFasterRCNN(nn.Module):
             features = self.detector.backbone(images_list.tensors)
             proposals, _ = self.detector.rpn(images_list, features, None)
             
-            # Retrieve the objectness scores stolen by our hook
-            objectness_scores = self.rpn_scores
+            # Retrieve the objectness scores stolen by our CustomRPN
+            objectness_scores = self.detector.rpn.rpn_scores
             
             # 3. Fast pass through RoI Head to get raw class logits
             box_features = self.detector.roi_heads.box_roi_pool(features, proposals, images_list.image_sizes)
