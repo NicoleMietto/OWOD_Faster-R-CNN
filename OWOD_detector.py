@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import roi_align
-import torch.nn.functional as F
 
 # Import external modules
 from labeler import OWOD_Labeler
@@ -137,6 +137,11 @@ class OWODFasterRCNN(nn.Module):
                 # Raw (imprecise) PREDICTIONS for knowns! 
                 pred_known_boxes = labels_dict['known_boxes'] 
                 
+                # Le proposte RPN sono già ordinate per objectness!
+                # Limitiamo i known a 10 per immagine in modo da bilanciare l'ETM
+                top_k_known = 10
+                pred_known_boxes = pred_known_boxes[:top_k_known]
+                
                 # --- NMS to not waste Top-K ---
                 raw_unknowns = labels_dict['unknown_boxes']
                 unk_scores = labels_dict['unknown_scores'] # You will also need to return scores from the labeler
@@ -145,8 +150,14 @@ class OWODFasterRCNN(nn.Module):
                 keep_idx = torchvision.ops.nms(raw_unknowns, unk_scores, iou_threshold=0.3)
                 filtered_unknowns = raw_unknowns[keep_idx]
                 
-                # NOW we take the Top-K without waste
-                top_k = 10
+                # Sort by objectness (take the ones the RPN is most confident about)
+                unk_scores = objectness_scores[i][keep_idx]
+                _, sort_idx = unk_scores.sort(descending=True)
+                filtered_unknowns = filtered_unknowns[sort_idx]
+                
+                # Get the TOP K proposals for unknowns to avoid overwhelming the ETM/URM
+                # Abbassato a 5 per ridurre le allucinazioni e velocizzare l'addestramento
+                top_k = 5
                 top_unknowns = filtered_unknowns[:top_k]
                 
                 # --- PHASE 3: URM (MobileSAM) ---
@@ -154,7 +165,8 @@ class OWODFasterRCNN(nn.Module):
                     refined_unknowns, loss_b_unk = self.urm(top_unknowns, images_list.tensors[i])
                     total_loss_b_unk = total_loss_b_unk + loss_b_unk
                 else:
-                    refined_unknowns = torch.empty((0, 4), device=device)
+                    # Se l'URM è spento, passiamo comunque all'ETM i riquadri grezzi della RPN!
+                    refined_unknowns = top_unknowns
                 
                 # --- PHASE 4: ETM (DINOv2) ---
                 valid_boxes_for_etm = torch.cat([pred_known_boxes, refined_unknowns])
@@ -238,17 +250,30 @@ class OWODFasterRCNN(nn.Module):
                     unk_boxes = unk_boxes[keep]
                     unk_scores = unk_scores[keep]
                     
+                    # --- CROSS-CLASS NMS ---
+                    # Filter out unknown boxes that heavily overlap with already detected KNOWN boxes
+                    known_boxes = detections[i]['boxes']
+                    if len(known_boxes) > 0 and len(unk_boxes) > 0:
+                        ious = torchvision.ops.box_iou(unk_boxes, known_boxes) # Shape: (num_unk, num_known)
+                        max_ious, _ = ious.max(dim=1)
+                        # Keep only unknown boxes that do NOT overlap significantly with any known box
+                        cross_keep = max_ious < 0.4
+                        unk_boxes = unk_boxes[cross_keep]
+                        unk_scores = unk_scores[cross_keep]
+                    
                     # Take top-K to avoid flooding predictions
-                    top_k = 10
-                    unk_boxes = unk_boxes[:top_k]
-                    unk_scores = unk_scores[:top_k]
+                    # Limitiamo a 5 gli unknown estratti per immagine
+                    top_k_infer = 5
+                    unk_boxes = unk_boxes[:top_k_infer]
+                    unk_scores = unk_scores[:top_k_infer]
                     
-                    # Add them to the image's detections with the dummy label 81
-                    unk_labels = torch.full((len(unk_boxes),), 81, dtype=torch.int64, device=unk_boxes.device)
-                    
-                    detections[i]['boxes'] = torch.cat([detections[i]['boxes'], unk_boxes])
-                    detections[i]['scores'] = torch.cat([detections[i]['scores'], unk_scores])
-                    detections[i]['labels'] = torch.cat([detections[i]['labels'], unk_labels])
+                    if len(unk_boxes) > 0:
+                        # Add them to the image's detections with the dummy label 81
+                        unk_labels = torch.full((len(unk_boxes),), 81, dtype=torch.int64, device=unk_boxes.device)
+                        
+                        detections[i]['boxes'] = torch.cat([detections[i]['boxes'], unk_boxes])
+                        detections[i]['scores'] = torch.cat([detections[i]['scores'], unk_scores])
+                        detections[i]['labels'] = torch.cat([detections[i]['labels'], unk_labels])
             
             # 6. Transform all boxes back to original image sizes
             detections = self.detector.transform.postprocess(detections, images_list.image_sizes, original_image_sizes)

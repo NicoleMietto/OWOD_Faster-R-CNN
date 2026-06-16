@@ -5,7 +5,7 @@ from torchvision.transforms import functional as F
 from OWOD_detector import OWODFasterRCNN
 import os
 import json
-#import config
+import config
 
 def main():
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -15,7 +15,7 @@ def main():
     model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True)
     
     # Prova a caricare best_model.pth, altrimenti owod_model_last.pth
-    model_path = "kaggle_best_model.pth"
+    model_path = os.path.join(config.CHECKPOINTS_DIR, "best_model.pth")
     if not os.path.exists(model_path):
         model_path = "owod_model_last.pth"
         
@@ -45,7 +45,7 @@ def main():
     with open(json_path, 'r') as f:
         data = json.load(f)
     
-    output_dir = "/kaggle/working"
+    output_dir = os.path.join(config.OUTPUT_DIR, "visual_test_results")
     os.makedirs(output_dir, exist_ok=True)
 
     # Prendiamo 15 immagini a caso per il test visivo
@@ -81,10 +81,13 @@ def main():
         text_labels = []
         keep_boxes = []
         
+        keep_scores_list = []
+        
         # Filtriamo per confidenza e separiamo i colori
         for box, label, score in zip(boxes, labels, scores):
-            if score > 0.5: # Soglia di confidenza al 50%
+            if score > 0.6: # Alziamo la soglia al 60% per pulire ulteriormente
                 keep_boxes.append(box)
+                keep_scores_list.append(score)
                 
                 # La nostra label fittizia per Unknown in OWOD_detector è 81
                 if label.item() == 81:
@@ -96,6 +99,16 @@ def main():
         
         if len(keep_boxes) > 0:
             keep_boxes = torch.stack(keep_boxes)
+            keep_scores_tensor = torch.stack(keep_scores_list)
+            
+            # --- FINAL VISUAL NMS (Class-Agnostic) ---
+            # Rimuove sovrapposizioni tra classi diverse (es. Known sopra Unknown)
+            final_keep = torchvision.ops.nms(keep_boxes, keep_scores_tensor, iou_threshold=0.3)
+            
+            keep_boxes = keep_boxes[final_keep]
+            colors = [colors[i] for i in final_keep]
+            text_labels = [text_labels[i] for i in final_keep]
+            
             drawn_image = torchvision.utils.draw_bounding_boxes(
                 image_to_draw, 
                 keep_boxes, 
