@@ -98,6 +98,7 @@ def main():
         break
 
     print("\n--- TEST: VALIDATION ITERATION (1 Batch) ---")
+    model.eval() # <-- IMPORTANTE: Aggiunto model.eval() per testare l'inferenza custom!
     with torch.no_grad():
         for i, (images, targets) in enumerate(val_loader):
             images = [img.to(device) for img in images]

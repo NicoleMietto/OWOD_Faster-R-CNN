@@ -65,14 +65,35 @@ def main():
     labels = labels[keep]
     scores = scores[keep]
     
-    print(f"Found {len(boxes)} objects with confidence > 0.5")
+    # --- AGGIUNTA: NMS Agnostico per pulire i box sovrapposti ---
+    # Applichiamo un NMS globale (ignora le classi) per rimuovere box che si 
+    # sovrappongono per più del 40% (IoU > 0.4)
+    if len(boxes) > 0:
+        nms_keep_idx = torchvision.ops.nms(boxes, scores, iou_threshold=0.4)
+        boxes = boxes[nms_keep_idx]
+        labels = labels[nms_keep_idx]
+        scores = scores[nms_keep_idx]
+    
+    # Se ci sono troppi unknown, limitiamo la visualizzazione ai top 5 per pulizia
+    final_boxes, final_labels, final_scores = [], [], []
+    unk_count = 0
+    for b, l, s in zip(boxes, labels, scores):
+        if l.item() == 21:
+            unk_count += 1
+            if unk_count > 5:
+                continue
+        final_boxes.append(b)
+        final_labels.append(l)
+        final_scores.append(s)
+        
+    print(f"Mostrando {len(final_boxes)} oggetti dopo pulizia (NMS e Top-5 Unknown)")
     
     # 4. Plotting
     plt.figure(figsize=(12, 8))
     plt.imshow(image)
     ax = plt.gca()
     
-    for box, label, score in zip(boxes, labels, scores):
+    for box, label, score in zip(final_boxes, final_labels, final_scores):
         x1, y1, x2, y2 = box.numpy()
         
         # L'etichetta 21 è "Unknown"

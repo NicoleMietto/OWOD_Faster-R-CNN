@@ -63,9 +63,10 @@ class OWODFasterRCNN(nn.Module):
                 parameter.requires_grad = False
                 
         # 3. Adapt the final classifier
-        # total num_classes = background (0) + known_classes + 1 (dummy class for unknowns)
+        # total num_classes = background (0) + known_classes (e.g. 20 for task 1)
+        # Note: We remove the +2 to not create useless output nodes.
         in_features = self.detector.roi_heads.box_predictor.cls_score.in_features
-        self.detector.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_known_classes + 2)
+        self.detector.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_known_classes + 1)
 
         self.rpn_scores = [] # We will save intercepted scores here
         
@@ -167,20 +168,14 @@ class OWODFasterRCNN(nn.Module):
                     total_loss_et = total_loss_et + loss_et
                 
                 # --- PHASE 5: Target Injection for Mild RoI Head ---
-                # Add SAM-refined boxes to the image's Ground Truths.
-                # The label will be num_known_classes + 1 (the dummy Unknown class)
-                new_target = targets_list[i].copy()
-                if len(refined_unknowns) > 0:
-                    new_labels = torch.full((len(refined_unknowns),), self.num_known_classes + 1, dtype=torch.int64, device=refined_unknowns.device)
-                    new_target['boxes'] = torch.cat([new_target['boxes'], refined_unknowns])
-                    new_target['labels'] = torch.cat([new_target['labels'], new_labels])
-                augmented_targets.append(new_target)
+                # REMOVED: We no longer inject unknown boxes into the RoI head targets.
+                # The RoI head will only train on the original known classes.
 
             # --- PHASE 6: Standard RoI Head (Mild Detection) ---
-            # We feed ALL RPN proposals and augmented targets to the base network.
-            # It will do mild matching (IoU > 0.5 for positives) and calculate classification and regression losses.
-            # roi_heads returns (predictions, dict_of_losses)
-            detections, detector_losses = self.detector.roi_heads(features, proposals, images_list.image_sizes, augmented_targets)
+            # We feed ALL RPN proposals and the ORIGINAL targets to the base network.
+            # It will compute classification and regression losses ONLY for known classes.
+            # Unknown proposals will be naturally treated as background by the RoI head.
+            detections, detector_losses = self.detector.roi_heads(features, proposals, images_list.image_sizes, targets_list)
             
             # Combine all losses
             total_losses = {}
@@ -192,4 +187,68 @@ class OWODFasterRCNN(nn.Module):
             return total_losses
             
         else:
-            return self.detector(images)
+            # --- CUSTOM INFERENCE FOR OPEN WORLD ---
+            # 1. Prepare original image sizes for final rescaling
+            original_image_sizes = []
+            for img in images:
+                val = img.shape[-2:]
+                original_image_sizes.append((val[0], val[1]))
+
+            # 2. Extract features and RPN proposals
+            images_list, _ = self.detector.transform(images, None)
+            features = self.detector.backbone(images_list.tensors)
+            proposals, _ = self.detector.rpn(images_list, features, None)
+            
+            # Retrieve the objectness scores stolen by our hook
+            objectness_scores = self.rpn_scores
+            
+            # 3. Fast pass through RoI Head to get raw class logits
+            box_features = self.detector.roi_heads.box_roi_pool(features, proposals, images_list.image_sizes)
+            box_features = self.detector.roi_heads.box_head(box_features)
+            class_logits, box_regression = self.detector.roi_heads.box_predictor(box_features)
+            
+            # 4. Standard postprocess for KNOWN objects
+            # This handles NMS and score thresholding for classes 1 to 20
+            detections, _ = self.detector.roi_heads.postprocess(proposals, class_logits, box_regression, images_list.image_sizes)
+            
+            # 5. Extract UNKNOWN objects
+            num_proposals_per_img = [p.shape[0] for p in proposals]
+            class_logits_per_img = class_logits.split(num_proposals_per_img, dim=0)
+            
+            for i in range(len(images)):
+                logits_i = class_logits_per_img[i]
+                probs_i = F.softmax(logits_i, dim=-1)
+                
+                # Max probability among all known classes (columns 1 to num_known_classes)
+                # Note: class 0 is background
+                known_scores, _ = probs_i[:, 1:self.num_known_classes+1].max(dim=1)
+                
+                # Unknown condition: High RPN objectness AND Low known class probability
+                obj_scores_i = objectness_scores[i]
+                is_unknown = (known_scores < 0.3) & (obj_scores_i >= 0.7)
+                
+                if is_unknown.any():
+                    unk_boxes = proposals[i][is_unknown]
+                    unk_scores = obj_scores_i[is_unknown]
+                    
+                    # Apply NMS specifically for unknown proposals
+                    keep = torchvision.ops.nms(unk_boxes, unk_scores, iou_threshold=0.3)
+                    unk_boxes = unk_boxes[keep]
+                    unk_scores = unk_scores[keep]
+                    
+                    # Take top-K to avoid flooding predictions
+                    top_k = 10
+                    unk_boxes = unk_boxes[:top_k]
+                    unk_scores = unk_scores[:top_k]
+                    
+                    # Add them to the image's detections with the dummy label 81
+                    unk_labels = torch.full((len(unk_boxes),), 81, dtype=torch.int64, device=unk_boxes.device)
+                    
+                    detections[i]['boxes'] = torch.cat([detections[i]['boxes'], unk_boxes])
+                    detections[i]['scores'] = torch.cat([detections[i]['scores'], unk_scores])
+                    detections[i]['labels'] = torch.cat([detections[i]['labels'], unk_labels])
+            
+            # 6. Transform all boxes back to original image sizes
+            detections = self.detector.transform.postprocess(detections, images_list.image_sizes, original_image_sizes)
+            
+            return detections
