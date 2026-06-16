@@ -5,42 +5,53 @@ from torchvision.transforms import functional as F
 from OWOD_detector import OWODFasterRCNN
 import os
 import json
+import config
 
 def main():
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     print(f"Avvio test visuale su {device}...")
 
-    # 1. Inizializza e carica il modello addestrato (Mini Best Model)
-    # L'architettura deve combaciare con quella addestrata.
-    model = OWODFasterRCNN(num_known_classes=20, use_spatial_cnn=True)
+    # 1. Inizializza e carica il modello addestrato sulle 10 classi
+    model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True)
     
-    model_path = "mini_best_model.pth"
+    # Prova a caricare best_model.pth, altrimenti owod_model_last.pth
+    model_path = os.path.join(config.CHECKPOINTS_DIR, "best_model.pth")
     if not os.path.exists(model_path):
-        print(f"❌ Errore: {model_path} non trovato. Devi prima avviare mini_train.py!")
+        model_path = "owod_model_last.pth"
+        
+    if not os.path.exists(model_path):
+        print(f"❌ Errore: Nessun modello trovato in {model_path}.")
         return
         
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    print(f"Caricamento pesi da: {model_path}")
+    checkpoint = torch.load(model_path, map_location=device)
+    # Se il salvataggio contiene 'model_state_dict', carichiamo quello
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
     model.to(device)
     
     # IMPORTANTE: Mettiamo in modalità EVALUATION. 
     # Questo disattiva la richiesta di targets, DINOv2 e SAM.
     model.eval() 
 
-    # 2. Carichiamo le immagini dal json mini per testarle (usiamo le stesse per verificare l'overfit)
-    json_path = "/kaggle/working/mini_task1_uu_train.json"
+    # 2. Carichiamo le immagini dal json di TEST (immagini mai viste dalla rete!)
+    json_path = "/kaggle/working/task1_10cls_uu_test.json"
     if not os.path.exists(json_path):
-        print(f"❌ Errore: {json_path} non trovato. Devi prima avviare create_mini_dataset.py!")
+        print(f"❌ Errore: {json_path} non trovato. Lancia prima generate_10class_splits.py!")
         return
 
     with open(json_path, 'r') as f:
         data = json.load(f)
     
-    output_dir = "visual_test_results"
+    output_dir = os.path.join(config.OUTPUT_DIR, "visual_test_results")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Prendiamo le prime 15 immagini per test visivo
+    # Prendiamo 15 immagini a caso per il test visivo
     images_to_test = data['images'][:15]
-    img_dir = "/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/train2017"
+    # Usa la cartella di validation originale di COCO poiché questo JSON deriva da val2017
+    img_dir = "/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/val2017"
 
     print("Inizio Inferenza...\n")
     for img_info in images_to_test:
