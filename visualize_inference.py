@@ -15,7 +15,7 @@ def main():
     model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True)
     
     # Prova a caricare best_model.pth, altrimenti owod_model_last.pth
-    model_path = os.path.join(config.CHECKPOINTS_DIR, "best_model.pth")
+    model_path = "kaggle_best_model.pth"
     if not os.path.exists(model_path):
         model_path = "owod_model_last.pth"
         
@@ -45,7 +45,7 @@ def main():
     with open(json_path, 'r') as f:
         data = json.load(f)
     
-    output_dir = os.path.join(config.OUTPUT_DIR, "visual_test_results")
+    output_dir = "/kaggle/working"
     os.makedirs(output_dir, exist_ok=True)
 
     # Prendiamo 15 immagini a caso per il test visivo
