@@ -209,7 +209,8 @@ class OWODFasterRCNN(nn.Module):
             
             # 4. Standard postprocess for KNOWN objects
             # This handles NMS and score thresholding for classes 1 to 20
-            detections, _ = self.detector.roi_heads.postprocess_detections(class_logits, box_regression, proposals, images_list.image_sizes)
+            boxes, scores, labels = self.detector.roi_heads.postprocess_detections(class_logits, box_regression, proposals, images_list.image_sizes)
+            detections = [{"boxes": b, "scores": s, "labels": l} for b, s, l in zip(boxes, scores, labels)]
             
             # 5. Extract UNKNOWN objects
             num_proposals_per_img = [p.shape[0] for p in proposals]
