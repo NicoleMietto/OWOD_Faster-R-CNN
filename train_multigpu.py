@@ -85,14 +85,14 @@ def main():
     # 4. Dataset Setup (Task 1)
     # ==========================================
     train_dataset = OWODDataset(
-        img_dir=config.IMAGES_DIR, 
-        annotation_file=os.path.join(config.ANNOTATIONS_DIR, "task1_10cls_uu_train.json"), 
+        img_dir='/kaggle/input/coco-2017-dataset/coco2017/train2017', 
+        annotation_file='/kaggle/working/task1_10cls_uu_train.json', 
         known_classes=[1, 2, 3, 4, 5, 6, 7, 8, 9, 15],
         transform=None 
     )
     val_dataset = OWODDataset(
-        img_dir=config.IMAGES_DIR, 
-        annotation_file=os.path.join(config.ANNOTATIONS_DIR, "task1_10cls_uu_val.json"), 
+        img_dir='/kaggle/input/coco-2017-dataset/coco2017/val2017', 
+        annotation_file='/kaggle/working/task1_10cls_uu_val.json', 
         known_classes=[1, 2, 3, 4, 5, 6, 7, 8, 9, 15],
         transform=None
     )
@@ -127,7 +127,7 @@ def main():
     patience = 5
     patience_counter = 0
     
-    checkpoint_path = os.path.join(config.CHECKPOINTS_DIR, "owod_model_last.pth")
+    checkpoint_path = "/kaggle/working/owod_model_last.pth"
     if os.path.exists(checkpoint_path):
         print(f"Found checkpoint {checkpoint_path}. Resuming training...")
         checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -137,7 +137,7 @@ def main():
         best_val_loss = checkpoint['best_val_loss']
         print(f"Resuming from epoch {start_epoch + 1} with best_val_loss={best_val_loss:.4f}")
         
-    csv_file = os.path.join(config.OUTPUT_DIR, "training_metrics.csv")
+    csv_file = "/kaggle/working/training_metrics.csv"
     write_header = not os.path.exists(csv_file)
     with open(csv_file, mode='a', newline='') as f:
         writer = csv.writer(f)
@@ -285,14 +285,14 @@ def main():
         }
         torch.save(checkpoint, checkpoint_path)
         
-        epoch_path = os.path.join(config.CHECKPOINTS_DIR, f"owod_model_epoch_{epoch+1}.pth")
+        epoch_path = f"/kaggle/working/owod_model_epoch_{epoch+1}.pth"
         torch.save(checkpoint, epoch_path)
         
         if val_avg['total'] < best_val_loss:
             best_val_loss = val_avg['total']
             patience_counter = 0
             print(f"New best model found! (Val Loss: {val_avg['total']:.4f}). Saving...")
-            best_path = os.path.join(config.CHECKPOINTS_DIR, "best_model.pth")
+            best_path = "/kaggle/working/best_model.pth"
             torch.save(base_model.state_dict(), best_path) # Anche qui salviamo solo i pesi del modello base
         else:
             patience_counter += 1
