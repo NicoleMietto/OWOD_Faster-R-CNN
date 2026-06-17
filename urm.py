@@ -26,9 +26,6 @@ class UnknownBoxRefineModule(nn.Module):
         # Explicitly freeze all weights to save memory on gradients
         for param in self.sam.parameters():
             param.requires_grad = False
-            
-        # Initialize predictor ONCE to avoid massive CPU RAM leaks during batch processing
-        self.predictor = SamPredictor(self.sam)
 
     def forward(self, top_unknown_boxes, raw_image_tensor):
         """
@@ -45,6 +42,9 @@ class UnknownBoxRefineModule(nn.Module):
         # If RPN did not find any unknown, do nothing
         if len(top_unknown_boxes) == 0:
             return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device, requires_grad=True)
+            
+        # MUST be instantiated inside forward so DataParallel uses the correct GPU replica.
+        predictor = SamPredictor(self.sam)
 
         # --- STEP 1: De-normalization and Preparation for SAM ---
         # torchvision uses this mean and std by default
@@ -57,14 +57,14 @@ class UnknownBoxRefineModule(nn.Module):
         original_h, original_w = unnorm_img.shape[1], unnorm_img.shape[2]
         
         # Pure GPU Pipeline: Resize image directly on GPU instead of CPU
-        target_length = self.predictor.transform.target_length
-        new_size = self.predictor.transform.get_preprocess_shape(original_h, original_w, target_length)
+        target_length = predictor.transform.target_length
+        new_size = predictor.transform.get_preprocess_shape(original_h, original_w, target_length)
         
         unnorm_img_255 = (unnorm_img.clamp(0, 1) * 255.0).unsqueeze(0)
         transformed_img = F.interpolate(unnorm_img_255, size=new_size, mode='bilinear', align_corners=False)
         
         # Pass the pre-processed tensor directly to SAM
-        self.predictor.set_torch_image(transformed_img, (original_h, original_w))
+        predictor.set_torch_image(transformed_img, (original_h, original_w))
         
         # --- STEP 2: Batched Prompting (Pass all Top-K boxes together) ---
         # Scale bounding boxes natively on GPU
@@ -77,7 +77,7 @@ class UnknownBoxRefineModule(nn.Module):
         
         # Inference without gradients
         with torch.no_grad():
-            masks, _, _ = self.predictor.predict_torch(
+            masks, _, _ = predictor.predict_torch(
                 point_coords=None,
                 point_labels=None,
                 boxes=input_boxes_torch,
@@ -86,7 +86,7 @@ class UnknownBoxRefineModule(nn.Module):
         # 'masks' has dimension [K, 1, H, W]
         
         # Free SAM internal cache immediately after prediction to prevent RAM leaks
-        self.predictor.reset_image()
+        predictor.reset_image()
         
         # --- STEP 3: Generation of New Bounding Boxes ---
         # A mask might be completely empty (SAM didn't find anything).
