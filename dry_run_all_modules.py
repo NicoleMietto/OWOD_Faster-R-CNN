@@ -66,6 +66,11 @@ def main():
     base_model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True, beta=0.1)
     base_model.dinov2 = dinov2
     
+    checkpoint_path = "/kaggle/working/best_model.pth"
+    if os.path.exists(checkpoint_path):
+        print(f"Trovato {checkpoint_path}! Carico i pesi pre-addestrati per simulare perfettamente l'Epoca 8...")
+        base_model.load_state_dict(torch.load(checkpoint_path, map_location=device), strict=False)
+    
     # ACCENDIAMO SUBITO TUTTI I MODULI PER IL TEST
     print("FORZATURA ATTIVA: Accensione immediata di ETM e URM per testare stabilità e tempi!")
     base_model.use_etm = True
@@ -123,12 +128,12 @@ def main():
             URM=f"{loss_dict.get('loss_b_unk', torch.tensor(0.0)).mean().item():.4f}"
         )
         
-        # Fermati dopo 10 batch. 10 batch sono sufficienti per far stabilizzare
-        # l'indicatore it/s di tqdm e darti una stima perfetta del tempo che ci metterebbe un'intera epoca.
-        if i >= 9:
+        # Fermati dopo 50 batch. 50 batch sono un test perfetto per simulare la varietà 
+        # di immagini (alcune con Sconosciuti, altre senza) e testare che il fix multi-GPU tenga.
+        if i >= 49:
             print("\n" + "="*50)
-            print("DRY RUN COMPLETATA CON SUCCESSO!")
-            print("Nessun crash multi-GPU rilevato. Guarda i dati 'it/s' di tqdm qui sopra per calcolare il tempo per l'epoca intera.")
+            print("DRY RUN COMPLETATA CON SUCCESSO! IL FIX FUNZIONA!")
+            print("Nessun crash multi-GPU rilevato su 50 batch. Il modello è stabile.")
             print("="*50)
             break
 

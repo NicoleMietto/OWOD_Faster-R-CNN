@@ -149,8 +149,15 @@ class OWODFasterRCNN(nn.Module):
             objectness_scores = self.detector.rpn.rpn_scores
             
             device = images_list.tensors.device
-            total_loss_b_unk = torch.tensor(0.0, device=device)
-            total_loss_et = torch.tensor(0.0, device=device)
+            
+            # MULTI-GPU CRITICAL FIX: Se un'immagine non ha oggetti sconosciuti, la loss sarebbe 0.0.
+            # Se restituiamo un 0.0 "puro" senza grad_fn, DataParallel crasha durante il backward()
+            # se l'altra GPU ha invece trovato oggetti e ha una loss valida.
+            # Creiamo un 0.0 matematicamente agganciato ai pesi della rete per ingannare l'Autograd!
+            dummy_loss = (self.embedding_head.network[-1].weight.sum() * 0.0).to(device)
+            total_loss_b_unk = dummy_loss.clone()
+            total_loss_et = dummy_loss.clone()
+            
             augmented_targets = []
             all_valid_boxes = [] # For ETM Batching
             
