@@ -21,7 +21,7 @@ def set_seed(seed=42):
 # Import our custom modules
 from OWOD_dataset import OWODDataset
 from OWOD_detector import OWODFasterRCNN
-#import config
+import config
 
 # ==========================================
 # 1. Custom DataParallel Wrapper
@@ -80,9 +80,10 @@ def main():
     dinov2.eval()
     for param in dinov2.parameters():
         param.requires_grad = False
-
-    # ==========================================
-    # 4. Dataset Setup (Task 1)
+    
+    # Attach DINOv2 directly to the base model so DataParallel clones it to both GPUs
+    base_model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True, beta=0.1)
+    base_model.dinov2 = dinov2
     # ==========================================
     train_dataset = OWODDataset(
         img_dir='/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/train2017', 
@@ -106,7 +107,7 @@ def main():
     # 5. OWOD Network and Optimizer Initialization
     # ==========================================
     # Impostiamo beta=0.1 per l'ETM per bilanciare la loss (~2.4) con quella di classificazione (~0.15)
-    model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True, beta=0.1).to(device)
+    model = base_model
     
     # MULTI-GPU INJECTION
     if torch.cuda.device_count() > 1:
@@ -187,31 +188,11 @@ def main():
         loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
         
         for i, (images, targets) in enumerate(loop):
-            # Le immagini restano inzialmente su CPU e verranno distribuite dal Wrapper DataParallel!
-            # Tuttavia per il calcolo di DINO dobbiamo metterle temporalmente su GPU 0
+            # We no longer pre-compute DINOv2 features here! 
+            # We let the DataParallel GPUs do it in parallel inside the model forward.
             
-            dino_features_list = None
-            if base_model.use_etm:
-                with torch.no_grad():
-                    dino_features_list = []
-                    for img in images:
-                        # Mettiamo l'immagine su device per il calcolo DINO
-                        img_dev = img.to(device)
-                        _, h, w = img_dev.shape
-                        new_h, new_w = (h // 14) * 14, (w // 14) * 14
-                        img_resized = F.interpolate(img_dev.unsqueeze(0), size=(new_h, new_w), mode='bilinear')
-                        
-                        features_dict = dinov2.forward_features(img_resized)
-                        patch_tokens = features_dict['x_norm_patchtokens'] 
-                        
-                        C = patch_tokens.shape[-1]
-                        dino_2d = patch_tokens.permute(0, 2, 1).reshape(1, C, new_h // 14, new_w // 14)
-                        
-                        # Li riportiamo su CPU in attesa di essere distribuiti dal DataParallel!
-                        dino_features_list.append(dino_2d.cpu())
-                    
             with torch.cuda.amp.autocast():
-                loss_dict = model(images, targets, dino_features_list)
+                loss_dict = model(images, targets, None)
                 # MULTI-GPU: loss_dict contiene array di loss (una per GPU). Usiamo .mean() per unificarle!
                 losses = sum(loss.mean() for loss in loss_dict.values())
             

@@ -103,6 +103,32 @@ class OWODFasterRCNN(nn.Module):
         self.etm = EmbeddingTransferModule()
         
     def forward(self, images, targets=None, dino_features_list=None):
+        """
+        Args:
+            images: list of Tensors (Raw images, unpadded, values 0-255 roughly usually, actually normalized by transform later)
+            targets: ...
+            dino_features_list: computed internally now!
+        """
+        # Determine the current device dynamically based on the first image
+        current_device = images[0].device
+        
+        if self.use_etm and hasattr(self, 'dinov2') and (dino_features_list is None or len(dino_features_list) == 0):
+            dino_features_list = []
+            with torch.no_grad():
+                for img in images:
+                    img_dev = img.to(current_device)
+                    _, h, w = img_dev.shape
+                    new_h, new_w = (h // 14) * 14, (w // 14) * 14
+                    img_resized = torch.nn.functional.interpolate(img_dev.unsqueeze(0), size=(new_h, new_w), mode='bilinear', align_corners=False)
+                    
+                    features_dict = self.dinov2.forward_features(img_resized)
+                    patch_tokens = features_dict['x_norm_patchtokens'] 
+                    C = patch_tokens.shape[-1]
+                    dino_2d = patch_tokens.permute(0, 2, 1).reshape(1, C, new_h // 14, new_w // 14)
+                    
+                    # Keep on the localized GPU!
+                    dino_features_list.append(dino_2d)
+
         if self.training:
             # --- PHASE 1: Feature Extraction & RPN ---
             images_list, targets_list = self.detector.transform(images, targets)
