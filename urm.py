@@ -114,7 +114,7 @@ class UnknownBoxRefineModule(nn.Module):
         valid_sam_boxes = sam_boxes[keep_mask].detach() # These are now "Ground Truth", detach() is applied!
         
         if len(valid_sam_boxes) == 0:
-             return torch.empty((0, 4), device=self.device), torch.tensor(0.0, device=self.device, requires_grad=True)
+             return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device, requires_grad=True)
 
         # --- STEP 5: Loss Calculation (L_b,unk) ---
         # This loss trains the RPN (valid_proposals has active gradients) to generate

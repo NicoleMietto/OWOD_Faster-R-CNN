@@ -189,7 +189,14 @@ def main():
             base_model.use_urm = True
             
         if epoch == 4 or epoch == 7:
-            print(f"--> New module activated at Epoch {epoch+1}. Resetting best loss tracking!")
+            print(f"--> New module activated at Epoch {epoch+1}.")
+            
+            # CURRICULUM LEARNING FIX: Ricarichiamo i pesi migliori della fase precedente prima di passare alla nuova!
+            if os.path.exists(best_path):
+                print(f"Loading BEST model weights from previous phase to avoid carrying over overfitted weights...")
+                base_model.load_state_dict(torch.load(best_path, map_location=device), strict=False)
+                
+            print("Resetting best loss tracking for the new phase!")
             best_val_loss = float('inf')
             patience_counter = 0
             
@@ -229,7 +236,10 @@ def main():
             
         num_batches_train = len(train_loader)
         train_avg = {k: v / num_batches_train for k, v in train_loss_sums.items()}
-        print(f"End of Epoch {epoch+1} - Train Loss: {train_avg['total']:.4f} (Cls: {train_avg['loss_classifier']:.4f}, Obj: {train_avg['loss_objectness']:.4f}, URM: {train_avg['loss_b_unk']:.4f}, ET: {train_avg['loss_et']:.4f})")
+        print(f"End of Epoch {epoch+1} - Train Loss: {train_avg['total']:.4f} "
+              f"(Cls: {train_avg['loss_classifier']:.4f}, Obj: {train_avg['loss_objectness']:.4f}, "
+              f"Box: {train_avg['loss_box_reg']:.4f}, RPNBox: {train_avg['loss_rpn_box_reg']:.4f}, "
+              f"URM: {train_avg['loss_b_unk']:.4f}, ET: {train_avg['loss_et']:.4f})")
         
         # ==========================================
         # VALIDATION LOOP
