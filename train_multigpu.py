@@ -108,6 +108,7 @@ def main():
     # ==========================================
     # Impostiamo beta=0.1 per l'ETM per bilanciare la loss (~2.4) con quella di classificazione (~0.15)
     model = base_model
+    model.to(device) # CRITICAL: Sposta il modello su GPU prima di darlo al DataParallel!
     
     # MULTI-GPU INJECTION
     if torch.cuda.device_count() > 1:
