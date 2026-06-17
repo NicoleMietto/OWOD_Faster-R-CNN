@@ -98,10 +98,11 @@ def main():
         transform=None
     )
     
-    # BATCH SIZE UFFICIALMENTE RADDOPPIATO A 8
-    # 4 immagini andranno a GPU 0 e 4 immagini a GPU 1
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, collate_fn=collate_fn, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=True)
+    # BATCH SIZE DIMEZZATO A 4 PER LA FASE 2 (URM)
+    # 2 immagini andranno a GPU 0 e 2 immagini a GPU 1.
+    # Abbiamo impostato num_workers=0 e pin_memory=False per annientare QUALSIASI memory leak della CPU!
+    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn, num_workers=0, pin_memory=False)
+    val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn, num_workers=0, pin_memory=False)
 
     # ==========================================
     # 5. OWOD Network and Optimizer Initialization
@@ -135,7 +136,7 @@ def main():
     # KAGGLE NOTEBOOK TRICK: Inserisci qui il nome esatto della cartella di input
     # che Kaggle ha creato quando hai aggiunto l'output del Notebook 1 al Notebook 2.
     # Di solito è qualcosa tipo: /kaggle/input/nome-del-notebook-1/best_model.pth
-    imported_best_path = "/kaggle/input/notebooks/miriamruzza/train-until-ep-7/best_model.pth"
+    imported_best_path = "/kaggle/input/INSERISCI_NOME_DATASET_QUI/best_model.pth"
     
     # SETUP: Set to True to force resuming from Epoch 4 (when ETM activates)
     force_resume_epoch_4 = False
