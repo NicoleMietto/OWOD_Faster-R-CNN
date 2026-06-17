@@ -100,8 +100,8 @@ def main():
     
     # BATCH SIZE UFFICIALMENTE RADDOPPIATO A 8
     # 4 immagini andranno a GPU 0 e 4 immagini a GPU 1
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, collate_fn=collate_fn, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=True)
 
     # ==========================================
     # 5. OWOD Network and Optimizer Initialization
