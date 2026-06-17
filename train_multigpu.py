@@ -21,7 +21,7 @@ def set_seed(seed=42):
 # Import our custom modules
 from OWOD_dataset import OWODDataset
 from OWOD_detector import OWODFasterRCNN
-#import config
+import config
 
 # ==========================================
 # 1. Custom DataParallel Wrapper
@@ -135,14 +135,14 @@ def main():
     if os.path.exists(checkpoint_path):
         print(f"Found checkpoint {checkpoint_path}. Resuming training...")
         checkpoint = torch.load(checkpoint_path, map_location=device)
-        base_model.load_state_dict(checkpoint['model_state_dict']) # IMPORTANTE: carichiamo i pesi nel modello base!
+        base_model.load_state_dict(checkpoint['model_state_dict'], strict=False) # IMPORTANTE: strict=False per ignorare i pesi di DINOv2 mancanti!
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
         best_val_loss = checkpoint['best_val_loss']
         print(f"Resuming from epoch {start_epoch + 1} with best_val_loss={best_val_loss:.4f}")
     elif os.path.exists(best_path):
         print(f"Found best_model.pth! Loading weights and forcing resume from Epoch 8...")
-        base_model.load_state_dict(torch.load(best_path, map_location=device))
+        base_model.load_state_dict(torch.load(best_path, map_location=device), strict=False)
         start_epoch = 7 # L'indice 7 corrisponde all'Epoca 8
         best_val_loss = 2.0111 # Valore preso dai tuoi log dell'Epoca 7
         
