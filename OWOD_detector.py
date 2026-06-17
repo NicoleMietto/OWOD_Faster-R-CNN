@@ -112,22 +112,8 @@ class OWODFasterRCNN(nn.Module):
         # Determine the current device dynamically based on the first image
         current_device = images[0].device
         
-        if self.use_etm and hasattr(self, 'dinov2') and (dino_features_list is None or len(dino_features_list) == 0):
-            dino_features_list = []
-            with torch.no_grad():
-                for img in images:
-                    img_dev = img.to(current_device)
-                    _, h, w = img_dev.shape
-                    new_h, new_w = (h // 14) * 14, (w // 14) * 14
-                    img_resized = torch.nn.functional.interpolate(img_dev.unsqueeze(0), size=(new_h, new_w), mode='bilinear', align_corners=False)
-                    
-                    features_dict = self.dinov2.forward_features(img_resized)
-                    patch_tokens = features_dict['x_norm_patchtokens'] 
-                    C = patch_tokens.shape[-1]
-                    dino_2d = patch_tokens.permute(0, 2, 1).reshape(1, C, new_h // 14, new_w // 14)
-                    
-                    # Keep on the localized GPU!
-                    dino_features_list.append(dino_2d)
+        # Removed sequential DINOv2 feature extraction here. 
+        # It is now computed internally after Faster R-CNN transformations to guarantee coordinate alignment.
 
         if self.training:
             # --- PHASE 1: Feature Extraction & RPN ---
@@ -137,6 +123,28 @@ class OWODFasterRCNN(nn.Module):
             # The RPN generates raw proposals (mild selection, generates thousands)
             proposals, proposal_losses = self.detector.rpn(images_list, features, targets_list)
             
+            # --- DINOv2 FEATURE EXTRACTION (Batched & Aligned) ---
+            if self.use_etm and hasattr(self, 'dinov2'):
+                with torch.no_grad():
+                    # images_list.tensors is (B, 3, H_pad, W_pad)
+                    augmented_images = images_list.tensors
+                    
+                    # Pad to nearest multiple of 14 for DINOv2
+                    pad_h = (14 - augmented_images.shape[2] % 14) % 14
+                    pad_w = (14 - augmented_images.shape[3] % 14) % 14
+                    img_padded = F.pad(augmented_images, (0, pad_w, 0, pad_h))
+                    
+                    features_dict = self.dinov2.forward_features(img_padded)
+                    patch_tokens = features_dict['x_norm_patchtokens']
+                    B_dino, _, C_dino = patch_tokens.shape
+                    
+                    # Compute spatial dimensions of the DINO feature map
+                    H_dino = img_padded.shape[2] // 14
+                    W_dino = img_padded.shape[3] // 14
+                    batched_dino_features = patch_tokens.permute(0, 2, 1).reshape(B_dino, C_dino, H_dino, W_dino)
+            else:
+                batched_dino_features = None
+            
             # 2. HERE IS THE MAGIC: Retrieve the scores just stolen by the CustomRPN!
             objectness_scores = self.detector.rpn.rpn_scores
             
@@ -144,12 +152,10 @@ class OWODFasterRCNN(nn.Module):
             total_loss_b_unk = torch.tensor(0.0, device=device)
             total_loss_et = torch.tensor(0.0, device=device)
             augmented_targets = []
+            all_valid_boxes = [] # For ETM Batching
             
             # Iterate for each image in the batch
             for i in range(len(images)):
-                # 2. Extract DINO feature map for this specific image
-                dino_features_i = dino_features_list[i] if dino_features_list is not None else None
-
                 # --- Pseudo-Labeling ---
                 labels_dict = self.labeler.assign_labels_known_unknown_background(
                     proposals[i], 
@@ -192,20 +198,33 @@ class OWODFasterRCNN(nn.Module):
                     # Se l'URM è spento, passiamo comunque all'ETM i riquadri grezzi della RPN!
                     refined_unknowns = top_unknowns
                 
-                # --- PHASE 4: ETM (DINOv2) ---
+                # --- PHASE 4: Prepare Boxes for ETM ---
                 valid_boxes_for_etm = torch.cat([pred_known_boxes, refined_unknowns])
-                
-                if self.use_etm and len(valid_boxes_for_etm) > 0 and dino_features_i is not None:
-                    # In FPN, features is an OrderedDict. We use the highest resolution feature map '0'
+                all_valid_boxes.append(valid_boxes_for_etm)
+
+            # --- PHASE 5: ETM (Batched Processing) ---
+            if self.use_etm and batched_dino_features is not None:
+                total_boxes = sum(len(b) for b in all_valid_boxes)
+                if total_boxes > 0:
                     feat_tensor = features['0'] if isinstance(features, dict) else features
-                    roi_features = roi_align(feat_tensor, [valid_boxes_for_etm], output_size=(7, 7), spatial_scale=1/4.0)
-                    instance_embeddings = self.embedding_head(roi_features)
                     
-                    loss_et = self.etm(dino_features_i, [valid_boxes_for_etm], instance_embeddings)
-                    total_loss_et = total_loss_et + loss_et
+                    # roi_align natively handles a list of tensors and assigns the correct batch index to each!
+                    roi_features = roi_align(feat_tensor, all_valid_boxes, output_size=(7, 7), spatial_scale=1/4.0)
+                    
+                    # Process all embeddings in parallel
+                    all_instance_embeddings = self.embedding_head(roi_features)
+                    
+                    # Split them back per image to compute the per-image contrastive loss
+                    num_boxes_per_image = [len(b) for b in all_valid_boxes]
+                    split_embeddings = torch.split(all_instance_embeddings, num_boxes_per_image)
+                    
+                    for i in range(len(images)):
+                        if num_boxes_per_image[i] > 0:
+                            # Pass the slice of batched_dino_features for image i (shape: 1xCxHxW)
+                            dino_feat_i = batched_dino_features[i:i+1]
+                            loss_et = self.etm(dino_feat_i, [all_valid_boxes[i]], split_embeddings[i])
+                            total_loss_et = total_loss_et + loss_et
                 
-                # --- PHASE 5: Target Injection for Mild RoI Head ---
-                # REMOVED: We no longer inject unknown boxes into the RoI head targets.
                 # The RoI head will only train on the original known classes.
 
             # --- PHASE 6: Standard RoI Head (Mild Detection) ---

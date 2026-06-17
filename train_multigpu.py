@@ -21,7 +21,7 @@ def set_seed(seed=42):
 # Import our custom modules
 from OWOD_dataset import OWODDataset
 from OWOD_detector import OWODFasterRCNN
-#import config
+# import config
 
 # ==========================================
 # 1. Custom DataParallel Wrapper
@@ -228,22 +228,8 @@ def main():
         
         with torch.no_grad():
             for images, targets in val_loop:
-                val_dino_features = None
-                if base_model.use_etm:
-                    val_dino_features = []
-                    for img in images:
-                        img_dev = img.to(device)
-                        _, h, w = img_dev.shape
-                        new_h, new_w = (h // 14) * 14, (w // 14) * 14
-                        img_resized = F.interpolate(img_dev.unsqueeze(0), size=(new_h, new_w), mode='bilinear')
-                        features_dict = dinov2.forward_features(img_resized)
-                        patch_tokens = features_dict['x_norm_patchtokens']
-                        C = patch_tokens.shape[-1]
-                        dino_2d = patch_tokens.permute(0, 2, 1).reshape(1, C, new_h // 14, new_w // 14)
-                        val_dino_features.append(dino_2d.cpu())
-                
                 with torch.cuda.amp.autocast():
-                    loss_dict = model(images, targets, val_dino_features)
+                    loss_dict = model(images, targets, None)
                     losses = sum(loss.mean() for loss in loss_dict.values())
                 
                 val_loss_sums['total'] += losses.item()
