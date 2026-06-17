@@ -26,8 +26,6 @@ class UnknownBoxRefineModule(nn.Module):
         # Explicitly freeze all weights to save memory on gradients
         for param in self.sam.parameters():
             param.requires_grad = False
-            
-        self.predictor = SamPredictor(self.sam)
 
     def forward(self, top_unknown_boxes, raw_image_tensor):
         """
@@ -39,9 +37,14 @@ class UnknownBoxRefineModule(nn.Module):
             valid_sam_boxes (Tensor): [M, 4] The perfect boxes (M <= K), used for ETM and RoI.
             loss_b_unk (Tensor): Scalar value of the refinement loss.
         """
+        current_device = top_unknown_boxes.device
+
         # If RPN did not find any unknown, do nothing
         if len(top_unknown_boxes) == 0:
-            return torch.empty((0, 4), device=self.device), torch.tensor(0.0, device=self.device, requires_grad=True)
+            return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device, requires_grad=True)
+            
+        # Dynamically instantiate predictor to ensure DataParallel uses the correct replicated model
+        predictor = SamPredictor(self.sam)
 
         # --- STEP 1: De-normalization and Preparation for SAM ---
         # torchvision uses this mean and std by default
@@ -55,18 +58,18 @@ class UnknownBoxRefineModule(nn.Module):
         img_np = (unnorm_img.clamp(0, 1).permute(1, 2, 0).detach().cpu().numpy() * 255).astype('uint8')
 
         # Pass the correct image to SAM's encoder
-        self.predictor.set_image(img_np)
+        predictor.set_image(img_np)
         
         # --- STEP 2: Batched Prompting (Pass all Top-K boxes together) ---
         boxes_np = top_unknown_boxes.detach().cpu().numpy()
         
         # Transform box coordinates into the dimensional format expected by SAM
-        input_boxes = self.predictor.transform.apply_boxes(boxes_np, self.predictor.original_size)
-        input_boxes_torch = torch.tensor(input_boxes, device=self.predictor.device)
+        input_boxes = predictor.transform.apply_boxes(boxes_np, predictor.original_size)
+        input_boxes_torch = torch.tensor(input_boxes, device=current_device)
         
         # Inference without gradients
         with torch.no_grad():
-            masks, _, _ = self.predictor.predict_torch(
+            masks, _, _ = predictor.predict_torch(
                 point_coords=None,
                 point_labels=None,
                 boxes=input_boxes_torch,
@@ -80,8 +83,11 @@ class UnknownBoxRefineModule(nn.Module):
         mask_bool = masks[:, 0]
         valid_mask_idx = mask_bool.view(mask_bool.shape[0], -1).any(dim=1)
         
+        # Ensure the boolean mask is on the correct GPU before indexing
+        valid_mask_idx = valid_mask_idx.to(current_device)
+        
         if not valid_mask_idx.any():
-            return torch.empty((0, 4), device=self.device), torch.tensor(0.0, device=self.device, requires_grad=True)
+            return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device, requires_grad=True)
             
         valid_masks = mask_bool[valid_mask_idx]
         sam_boxes = ops.masks_to_boxes(valid_masks)
