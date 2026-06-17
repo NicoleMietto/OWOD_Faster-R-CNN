@@ -21,7 +21,7 @@ def set_seed(seed=42):
 # Import our custom modules
 from OWOD_dataset import OWODDataset
 from OWOD_detector import OWODFasterRCNN
-#import config
+import config
 
 # ==========================================
 # 1. Custom DataParallel Wrapper
@@ -105,7 +105,8 @@ def main():
     # ==========================================
     # 5. OWOD Network and Optimizer Initialization
     # ==========================================
-    model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True).to(device)
+    # Impostiamo beta=0.1 per l'ETM per bilanciare la loss (~2.4) con quella di classificazione (~0.15)
+    model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True, beta=0.1).to(device)
     
     # MULTI-GPU INJECTION
     if torch.cuda.device_count() > 1:
@@ -128,6 +129,8 @@ def main():
     patience_counter = 0
     
     checkpoint_path = "/kaggle/working/owod_model_last.pth"
+    best_path = "/kaggle/working/best_model.pth"
+    
     if os.path.exists(checkpoint_path):
         print(f"Found checkpoint {checkpoint_path}. Resuming training...")
         checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -136,6 +139,11 @@ def main():
         start_epoch = checkpoint['epoch'] + 1
         best_val_loss = checkpoint['best_val_loss']
         print(f"Resuming from epoch {start_epoch + 1} with best_val_loss={best_val_loss:.4f}")
+    elif os.path.exists(best_path):
+        print(f"Found best_model.pth! Loading weights and forcing resume from Epoch 8...")
+        base_model.load_state_dict(torch.load(best_path, map_location=device))
+        start_epoch = 7 # L'indice 7 corrisponde all'Epoca 8
+        best_val_loss = 2.0111 # Valore preso dai tuoi log dell'Epoca 7
         
     csv_file = "/kaggle/working/training_metrics.csv"
     write_header = not os.path.exists(csv_file)
