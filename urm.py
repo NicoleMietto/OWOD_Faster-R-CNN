@@ -54,18 +54,26 @@ class UnknownBoxRefineModule(nn.Module):
         # Reverse the normalization formula: (img * std) + mean
         unnorm_img = (raw_image_tensor * std) + mean
         
-        # Ensure values don't overflow and convert to HWC numpy array uint8 (0-255)
-        img_np = (unnorm_img.clamp(0, 1).permute(1, 2, 0).detach().cpu().numpy() * 255).astype('uint8')
-
-        # Pass the correct image to SAM's encoder
-        predictor.set_image(img_np)
+        original_h, original_w = unnorm_img.shape[1], unnorm_img.shape[2]
+        
+        # Pure GPU Pipeline: Resize image directly on GPU instead of CPU
+        target_length = predictor.transform.target_length
+        new_size = predictor.transform.get_preprocess_shape(original_h, original_w, target_length)
+        
+        unnorm_img_255 = (unnorm_img.clamp(0, 1) * 255.0).unsqueeze(0)
+        transformed_img = F.interpolate(unnorm_img_255, size=new_size, mode='bilinear', align_corners=False)
+        
+        # Pass the pre-processed tensor directly to SAM
+        predictor.set_torch_image(transformed_img, (original_h, original_w))
         
         # --- STEP 2: Batched Prompting (Pass all Top-K boxes together) ---
-        boxes_np = top_unknown_boxes.detach().cpu().numpy()
+        # Scale bounding boxes natively on GPU
+        ratio_h = new_size[0] / original_h
+        ratio_w = new_size[1] / original_w
         
-        # Transform box coordinates into the dimensional format expected by SAM
-        input_boxes = predictor.transform.apply_boxes(boxes_np, predictor.original_size)
-        input_boxes_torch = torch.tensor(input_boxes, device=current_device)
+        input_boxes_torch = top_unknown_boxes.clone()
+        input_boxes_torch[:, [0, 2]] *= ratio_w
+        input_boxes_torch[:, [1, 3]] *= ratio_h
         
         # Inference without gradients
         with torch.no_grad():
