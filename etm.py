@@ -44,6 +44,10 @@ class EmbeddingTransferModule(nn.Module):
         # Pass from [N, C, 7, 7] to [N, C] via Global Average Pooling
         source_embeddings = aligned_dino_features.mean(dim=[2, 3]) 
 
+        # --- L2 NORMALIZATION (Crucial for Contrastive Learning) ---
+        source_embeddings = torch.nn.functional.normalize(source_embeddings, p=2, dim=1)
+        instance_embeddings = torch.nn.functional.normalize(instance_embeddings, p=2, dim=1)
+
         # --- Step 2: Semantic Similarity Calculation (W_ij) ---
         dist_S = torch.cdist(source_embeddings, source_embeddings, p=2.0)
         W = torch.exp(-(dist_S ** 2) / self.sigma)

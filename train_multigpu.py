@@ -132,8 +132,22 @@ def main():
     
     checkpoint_path = "/kaggle/working/owod_model_last.pth"
     best_path = "/kaggle/working/best_model.pth"
+    epoch_4_path = "/kaggle/working/owod_model_epoch_4.pth"
     
-    if os.path.exists(checkpoint_path):
+    # SETUP: Set to True to force resuming from Epoch 4 (when ETM activates)
+    force_resume_epoch_4 = False
+    
+    if force_resume_epoch_4 and os.path.exists(epoch_4_path):
+        print(f"Forcing resume from {epoch_4_path} (Start of ETM phase)...")
+        checkpoint = torch.load(epoch_4_path, map_location=device)
+        base_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # The checkpoint saved at the end of epoch index 3 (Epoch 4) has checkpoint['epoch'] = 3.
+        # We resume from epoch index 4 (Epoch 5), where ETM is turned on.
+        start_epoch = checkpoint['epoch'] + 1 
+        best_val_loss = checkpoint['best_val_loss']
+        print(f"Resuming from epoch {start_epoch + 1} with best_val_loss={best_val_loss:.4f}")
+    elif os.path.exists(checkpoint_path):
         print(f"Found checkpoint {checkpoint_path}. Resuming training...")
         checkpoint = torch.load(checkpoint_path, map_location=device)
         base_model.load_state_dict(checkpoint['model_state_dict'], strict=False) # IMPORTANTE: strict=False per ignorare i pesi di DINOv2 mancanti!
