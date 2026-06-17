@@ -21,7 +21,7 @@ def set_seed(seed=42):
 # Import our custom modules
 from OWOD_dataset import OWODDataset
 from OWOD_detector import OWODFasterRCNN
-import config
+#import config
 
 # ==========================================
 # 1. Custom DataParallel Wrapper
