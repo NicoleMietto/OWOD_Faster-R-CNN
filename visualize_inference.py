@@ -55,7 +55,7 @@ def main():
         model.to(device)
         model.eval() # MODALITÀ INFERENZA
 
-        output_dir = os.path.join(config.OUTPUT_DIR, f"visual_test_results/{model_name}")
+        output_dir = f"/kaggle/working/visual_test_results/{model_name}"
         os.makedirs(output_dir, exist_ok=True)
 
         for img_info in images_to_test:
