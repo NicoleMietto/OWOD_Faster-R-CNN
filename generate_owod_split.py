@@ -93,7 +93,7 @@ def split_and_save(coco_dict, output_train, output_val, split_ratio=0.9, subsamp
 
 if __name__ == "__main__":
     # TASK 1: Le tue famose 10 classi!
-    TASK_1_CLASSES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 15]
+    TASK_1_CLASSES = [1,3,5,17,27,44,52,62,72,84]
 
     TRAIN_ANNOTATIONS = '/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/annotations/instances_train2017.json'
     
@@ -117,7 +117,7 @@ if __name__ == "__main__":
         output_train=OUTPUT_FILE_TRAIN, 
         output_val=OUTPUT_FILE_VAL, 
         split_ratio=0.9, 
-        subsample_ratio=1.0 # 1.0 significa che teniamo TUTTE le immagini, per dare alla rete tanta varietà!
+        subsample_ratio=0.1 # 1.0 significa che teniamo TUTTE le immagini, per dare alla rete tanta varietà!
     )
     
     print(f"Finito! Usa i file: {OUTPUT_FILE_TRAIN} e {OUTPUT_FILE_VAL} per il tuo addestramento.")
