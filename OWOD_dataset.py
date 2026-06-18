@@ -46,8 +46,9 @@ class OWODDataset(Dataset):
         img_info = self.images[idx]
         img_path = os.path.join(self.img_dir, img_info['file_name'])
         
-        # Load image
-        img = Image.open(img_path).convert("RGB")
+        # Load image safely and close the file descriptor immediately
+        with Image.open(img_path) as img_file:
+            img = img_file.convert("RGB")
         
         # Load annotations
         anns = self.img_id_to_anns[img_info['id']]
