@@ -105,8 +105,8 @@ def main():
     # BATCH SIZE DIMEZZATO A 4 PER LA FASE 2 (URM)
     # 2 immagini andranno a GPU 0 e 2 immagini a GPU 1.
     # Abbiamo impostato num_workers=0 e pin_memory=False per annientare QUALSIASI memory leak della CPU!
-    train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, collate_fn=collate_fn, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=6, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn, num_workers=0, pin_memory=False)
+    val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn, num_workers=0, pin_memory=False)
 
     # ==========================================
     # 5. OWOD Network and Optimizer Initialization
@@ -125,6 +125,11 @@ def main():
     
     params = [p for p in base_model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=1e-4, weight_decay=1e-4)
+    
+    # Aggiungiamo uno Scheduler: riduce il LR di 10x dopo l'Epoca 7
+    # Questo è FONDAMENTALE perché alla Fase 2 (Epoca 8+) la rete fa "fine-tuning" con ETM e URM.
+    # Un LR troppo alto fa letteralmente "esplodere" e competere i gradienti della RPN!
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
     # ==========================================
     # 6. RESUME FROM CHECKPOINT AND CSV LOGGING
@@ -140,7 +145,7 @@ def main():
     # KAGGLE NOTEBOOK TRICK: Inserisci qui il nome esatto della cartella di input
     # che Kaggle ha creato quando hai aggiunto l'output del Notebook 1 al Notebook 2.
     # Di solito è qualcosa tipo: /kaggle/input/nome-del-notebook-1/best_model.pth
-    imported_best_path = "/kaggle/input/notebooks/miriamruzza/train-until-ep-7/best_model.pth"
+    imported_best_path = "/kaggle/input/INSERISCI_NOME_DATASET_QUI/best_model.pth"
     
     # SETUP: Set to True to force resuming from Epoch 4 (when ETM activates)
     force_resume_epoch_4 = False
@@ -245,7 +250,6 @@ def main():
             
             # CRITICAL MEMORY LEAK FIX: Force Python to delete variables.
             # Do NOT use gc.collect() here because it breaks PyTorch DataLoader multiprocessing queues!
-            # Python's GC often fails to clean up PyTorch DataParallel cyclic references fast enough!
             del images, targets, loss_dict, losses
             
         num_batches_train = len(train_loader)
@@ -254,6 +258,10 @@ def main():
               f"(Cls: {train_avg['loss_classifier']:.4f}, Obj: {train_avg['loss_objectness']:.4f}, "
               f"Box: {train_avg['loss_box_reg']:.4f}, RPNBox: {train_avg['loss_rpn_box_reg']:.4f}, "
               f"URM: {train_avg['loss_b_unk']:.4f}, ET: {train_avg['loss_et']:.4f})")
+              
+        # Aggiorniamo il learning rate a fine epoca
+        scheduler.step()
+        print(f"Current Learning Rate: {scheduler.get_last_lr()[0]}")
         
         # ==========================================
         # VALIDATION LOOP
