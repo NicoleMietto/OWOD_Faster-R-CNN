@@ -5,7 +5,7 @@ from torchvision.transforms import functional as F
 from OWOD_detector import OWODFasterRCNN
 import os
 import json
-import config
+#import config
 
 def main():
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
