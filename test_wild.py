@@ -19,7 +19,7 @@ def main():
 
     # 1. Carica il modello (usiamo il best_model.pth dell'Epoca 8)
     model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True)
-    model_path = "/kaggle/working/best_model.pth"
+    model_path = "/kaggle/working/owod_model_last.pth"
     
     if not os.path.exists(model_path):
         print(f"❌ Errore: {model_path} non trovato!")
