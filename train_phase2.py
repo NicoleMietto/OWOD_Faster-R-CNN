@@ -136,7 +136,7 @@ def main():
     # KAGGLE NOTEBOOK TRICK: Inserisci qui il nome esatto della cartella di input
     # che Kaggle ha creato quando hai aggiunto l'output del Notebook 1 al Notebook 2.
     # Di solito è qualcosa tipo: /kaggle/input/nome-del-notebook-1/best_model.pth
-    imported_best_path = "/kaggle/input/INSERISCI_NOME_DATASET_QUI/best_model.pth"
+    imported_best_path = "/kaggle/input/notebooks/miriamruzza/train-until-ep-7/best_model.pth"
     
     # SETUP: Set to True to force resuming from Epoch 4 (when ETM activates)
     force_resume_epoch_4 = False
