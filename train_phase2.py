@@ -221,10 +221,11 @@ def main():
             # We no longer pre-compute DINOv2 features here! 
             # We let the DataParallel GPUs do it in parallel inside the model forward.
             
-            with torch.cuda.amp.autocast():
-                loss_dict = model(images, targets, None)
-                # MULTI-GPU: loss_dict contiene array di loss (una per GPU). Usiamo .mean() per unificarle!
-                losses = sum(loss.mean() for loss in loss_dict.values())
+            # Autocast is now handled inside the model's forward method!
+            loss_dict = model(images, targets, None)
+            
+            # MULTI-GPU: loss_dict contiene array di loss (una per GPU). Usiamo .mean() per unificarle!
+            losses = sum(loss.mean() for loss in loss_dict.values())
             
             optimizer.zero_grad()
             scaler.scale(losses).backward()
@@ -242,11 +243,10 @@ def main():
                 
             loop.set_postfix(loss=losses.item())
             
-            # CRITICAL MEMORY LEAK FIX: Force Python to delete variables and run Garbage Collection.
+            # CRITICAL MEMORY LEAK FIX: Force Python to delete variables.
+            # Do NOT use gc.collect() here because it breaks PyTorch DataLoader multiprocessing queues!
             # Python's GC often fails to clean up PyTorch DataParallel cyclic references fast enough!
             del images, targets, loss_dict, losses
-            import gc
-            gc.collect()
             
         num_batches_train = len(train_loader)
         train_avg = {k: v / num_batches_train for k, v in train_loss_sums.items()}
@@ -266,9 +266,9 @@ def main():
         
         with torch.no_grad():
             for images, targets in val_loop:
-                with torch.cuda.amp.autocast():
-                    loss_dict = model(images, targets, None)
-                    losses = sum(loss.mean() for loss in loss_dict.values())
+                # Autocast is now inside the model's forward method
+                loss_dict = model(images, targets, None)
+                losses = sum(loss.mean() for loss in loss_dict.values())
                 
                 val_loss_sums['total'] += losses.item()
                 for k, v in loss_dict.items():
