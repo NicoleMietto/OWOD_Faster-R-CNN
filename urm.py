@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 # MobileSAM must be installed in the environment (e.g. Colab/Kaggle) with:
 # !pip install git+https://github.com/ChaoningZhang/MobileSAM.git
-from mobile_sam import sam_model_registry, SamPredictor
+from mobile_sam import sam_model_registry
 
 class UnknownBoxRefineModule(nn.Module):
     """
@@ -43,31 +43,32 @@ class UnknownBoxRefineModule(nn.Module):
         if len(top_unknown_boxes) == 0:
             return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device, requires_grad=True)
             
-        # MUST be instantiated inside forward so DataParallel uses the correct GPU replica.
-        predictor = SamPredictor(self.sam)
-
-        # --- STEP 1: De-normalization and Preparation for SAM ---
-        # torchvision uses this mean and std by default
-        mean = torch.tensor([0.485, 0.456, 0.406], device=raw_image_tensor.device).view(3, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225], device=raw_image_tensor.device).view(3, 1, 1)
+        # --- STATELESS SAM INFERENCE (Prevents CPU/GPU Memory Leaks) ---
+        # 1. Pure GPU Pipeline: Resize image directly on GPU
+        target_length = self.sam.image_encoder.img_size # usually 1024
         
         # Reverse the normalization formula: (img * std) + mean
+        mean = torch.tensor([0.485, 0.456, 0.406], device=current_device).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225], device=current_device).view(3, 1, 1)
         unnorm_img = (raw_image_tensor * std) + mean
         
         original_h, original_w = unnorm_img.shape[1], unnorm_img.shape[2]
-        
-        # Pure GPU Pipeline: Resize image directly on GPU instead of CPU
-        target_length = predictor.transform.target_length
-        new_size = predictor.transform.get_preprocess_shape(original_h, original_w, target_length)
+        scale = target_length / max(original_h, original_w)
+        new_size = (int(original_h * scale + 0.5), int(original_w * scale + 0.5))
         
         unnorm_img_255 = (unnorm_img.clamp(0, 1) * 255.0).unsqueeze(0)
         transformed_img = F.interpolate(unnorm_img_255, size=new_size, mode='bilinear', align_corners=False)
         
-        # Pass the pre-processed tensor directly to SAM
-        predictor.set_torch_image(transformed_img, (original_h, original_w))
+        # 2. SAM Preprocess (Normalize and Pad)
+        pixel_mean = torch.tensor([123.675, 116.28, 103.53], device=current_device).view(1, 3, 1, 1)
+        pixel_std = torch.tensor([58.395, 57.12, 57.375], device=current_device).view(1, 3, 1, 1)
+        x = (transformed_img - pixel_mean) / pixel_std
         
-        # --- STEP 2: Batched Prompting (Pass all Top-K boxes together) ---
-        # Scale bounding boxes natively on GPU
+        padh = target_length - x.shape[2]
+        padw = target_length - x.shape[3]
+        input_image = F.pad(x, (0, padw, 0, padh))
+        
+        # 3. Batched Prompting
         ratio_h = new_size[0] / original_h
         ratio_w = new_size[1] / original_w
         
@@ -77,16 +78,28 @@ class UnknownBoxRefineModule(nn.Module):
         
         # Inference without gradients
         with torch.no_grad():
-            masks, _, _ = predictor.predict_torch(
-                point_coords=None,
-                point_labels=None,
+            features = self.sam.image_encoder(input_image)
+            
+            sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
+                points=None,
                 boxes=input_boxes_torch,
-                multimask_output=False, # We only want the "best" mask for each box
+                masks=None,
             )
-        # 'masks' has dimension [K, 1, H, W]
-        
-        # Free SAM internal cache immediately after prediction to prevent RAM leaks
-        predictor.reset_image()
+            
+            low_res_masks, iou_predictions = self.sam.mask_decoder(
+                image_embeddings=features,
+                image_pe=self.sam.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=False,
+            )
+            
+            # Postprocess Masks
+            masks = F.interpolate(low_res_masks, size=(target_length, target_length), mode="bilinear", align_corners=False)
+            masks = masks[..., : new_size[0], : new_size[1]]
+            masks = F.interpolate(masks, size=(original_h, original_w), mode="bilinear", align_corners=False)
+            
+            # 'masks' has dimension [K, 1, H, W]
         
         # --- STEP 3: Generation of New Bounding Boxes ---
         # A mask might be completely empty (SAM didn't find anything).

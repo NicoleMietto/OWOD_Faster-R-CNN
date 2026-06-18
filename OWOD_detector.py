@@ -247,6 +247,9 @@ class OWODFasterRCNN(nn.Module):
             total_losses['loss_b_unk'] = (total_loss_b_unk / len(images)) * self.alpha
             total_losses['loss_et'] = (total_loss_et / len(images)) * self.beta
             
+            # CRITICAL MEMORY LEAK FIX: Clear the cached scores to break the computation graph reference cycle
+            self.detector.rpn.rpn_scores = []
+            
             return total_losses
             
         else:
@@ -327,5 +330,8 @@ class OWODFasterRCNN(nn.Module):
             
             # 6. Transform all boxes back to original image sizes
             detections = self.detector.transform.postprocess(detections, images_list.image_sizes, original_image_sizes)
+            
+            # CRITICAL MEMORY LEAK FIX: Clear the cached scores
+            self.detector.rpn.rpn_scores = []
             
             return detections
