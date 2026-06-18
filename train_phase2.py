@@ -136,7 +136,7 @@ def main():
     # KAGGLE NOTEBOOK TRICK: Inserisci qui il nome esatto della cartella di input
     # che Kaggle ha creato quando hai aggiunto l'output del Notebook 1 al Notebook 2.
     # Di solito è qualcosa tipo: /kaggle/input/nome-del-notebook-1/best_model.pth
-    imported_best_path = "/kaggle/input/notebooks/miriamruzza/train-until-ep-7/best_model.pth"
+    imported_best_path = "/kaggle/input/INSERISCI_NOME_DATASET_QUI/best_model.pth"
     
     # SETUP: Set to True to force resuming from Epoch 4 (when ETM activates)
     force_resume_epoch_4 = False
@@ -211,7 +211,7 @@ def main():
                            'loss_objectness': 0.0, 'loss_rpn_box_reg': 0.0, 
                            'loss_b_unk': 0.0, 'loss_et': 0.0}
         
-        loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
+        loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", mininterval=30.0)
         
         for i, (images, targets) in enumerate(loop):
             # We no longer pre-compute DINOv2 features here! 
@@ -238,6 +238,12 @@ def main():
                 
             loop.set_postfix(loss=losses.item())
             
+            # CRITICAL MEMORY LEAK FIX: Force Python to delete variables and run Garbage Collection.
+            # Python's GC often fails to clean up PyTorch DataParallel cyclic references fast enough!
+            del images, targets, loss_dict, losses
+            import gc
+            gc.collect()
+            
         num_batches_train = len(train_loader)
         train_avg = {k: v / num_batches_train for k, v in train_loss_sums.items()}
         print(f"End of Epoch {epoch+1} - Train Loss: {train_avg['total']:.4f} "
@@ -252,7 +258,7 @@ def main():
         val_loss_sums = {'total': 0.0, 'loss_classifier': 0.0, 'loss_box_reg': 0.0, 
                          'loss_objectness': 0.0, 'loss_rpn_box_reg': 0.0, 
                          'loss_b_unk': 0.0, 'loss_et': 0.0}
-        val_loop = tqdm(val_loader, desc="Validation")
+        val_loop = tqdm(val_loader, desc="Validation", mininterval=30.0)
         
         with torch.no_grad():
             for images, targets in val_loop:
