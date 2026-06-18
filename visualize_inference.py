@@ -48,9 +48,9 @@ def main():
         
         checkpoint = torch.load(model_path, map_location=device)
         if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
+            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
         else:
-            model.load_state_dict(checkpoint)
+            model.load_state_dict(checkpoint, strict=False)
             
         model.to(device)
         model.eval() # MODALITÀ INFERENZA
