@@ -8,6 +8,9 @@ import csv
 import random
 import numpy as np
 
+# Suppress warnings to prevent Jupyter IOPub RAM leaks from spammy PyTorch warnings!
+warnings.filterwarnings("ignore")
+
 def set_seed(seed=42):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
