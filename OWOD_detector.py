@@ -102,6 +102,7 @@ class OWODFasterRCNN(nn.Module):
         self.urm = UnknownBoxRefineModule(sam_checkpoint_path=sam_path, device='cuda' if torch.cuda.is_available() else 'cpu')
         self.etm = EmbeddingTransferModule()
         
+    @torch.cuda.amp.autocast()
     def forward(self, images, targets=None, dino_features_list=None):
         """
         Args:
