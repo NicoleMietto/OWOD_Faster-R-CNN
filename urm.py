@@ -48,13 +48,10 @@ class UnknownBoxRefineModule(nn.Module):
         # If RPN did not find any unknown, do nothing
         if len(top_unknown_boxes) == 0:
             return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device)
-
-        # Dynamically load/fetch the SAM model for the current GPU
-        sam = self._load_sam(current_device)
             
         # --- STATELESS SAM INFERENCE (Prevents CPU/GPU Memory Leaks) ---
         # 1. Pure GPU Pipeline: Resize image directly on GPU
-        target_length = sam.image_encoder.img_size # usually 1024
+        target_length = self.sam.image_encoder.img_size # usually 1024
         
         # Reverse the normalization formula: (img * std) + mean
         mean = self.img_mean.to(current_device)
