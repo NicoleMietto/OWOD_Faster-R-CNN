@@ -47,7 +47,7 @@ class UnknownBoxRefineModule(nn.Module):
 
         # If RPN did not find any unknown, do nothing
         if len(top_unknown_boxes) == 0:
-            return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device, requires_grad=True)
+            return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device)
             
         # --- STATELESS SAM INFERENCE (Prevents CPU/GPU Memory Leaks) ---
         # 1. Pure GPU Pipeline: Resize image directly on GPU
@@ -117,7 +117,7 @@ class UnknownBoxRefineModule(nn.Module):
         valid_mask_idx = valid_mask_idx.to(current_device)
         
         if not valid_mask_idx.any():
-            return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device, requires_grad=True)
+            return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device)
             
         valid_masks = mask_bool[valid_mask_idx]
         sam_boxes = ops.masks_to_boxes(valid_masks)
@@ -136,7 +136,7 @@ class UnknownBoxRefineModule(nn.Module):
         valid_sam_boxes = sam_boxes[keep_mask].detach() # These are now "Ground Truth", detach() is applied!
         
         if len(valid_sam_boxes) == 0:
-             return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device, requires_grad=True)
+             return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device)
 
         # --- STEP 5: Loss Calculation (L_b,unk) ---
         # This loss trains the RPN (valid_proposals has active gradients) to generate
