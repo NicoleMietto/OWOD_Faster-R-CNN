@@ -1,9 +1,4 @@
 import os
-# NUCLEAR FIX FOR LINUX GLIBC FRAGMENTATION
-# This forces glibc to use only 2 arenas, preventing massive memory fragmentation 
-# caused by multithreading (DataParallel) when creating thousands of tensors.
-os.environ['MALLOC_ARENA_MAX'] = '2'
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,9 +8,6 @@ import csv
 import random
 import numpy as np
 import warnings
-import gc
-import ctypes
-import psutil
 
 # Suppress warnings to prevent Jupyter IOPub RAM leaks from spammy PyTorch warnings!
 warnings.filterwarnings("ignore")
@@ -80,15 +72,17 @@ def collate_fn(batch):
 
 def main():
     set_seed(42)
-    device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f"Starting training on: {device}")
 
     # ==========================================
     # 3. DINOv2 Initialization (Foundation Model)
     # ==========================================
     print("Loading DINOv2 (ViT-Small)...")
-    dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14')
-    dinov2 = dinov2.to(device) # Lo teniamo sulla GPU 0 perché fa pochissimo sforzo (21M parametri)
+    import logging
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14', verbose=False)
+    dinov2 = dinov2.to(device)
     dinov2.eval()
     for param in dinov2.parameters():
         param.requires_grad = False
@@ -113,8 +107,8 @@ def main():
     # BATCH SIZE DIMEZZATO A 4 PER LA FASE 2 (URM)
     # 2 immagini andranno a GPU 0 e 2 immagini a GPU 1.
     # Abbiamo impostato num_workers=0 e pin_memory=False per annientare QUALSIASI memory leak della CPU!
-    train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, collate_fn=collate_fn, num_workers=4, pin_memory=False)
-    val_loader = DataLoader(val_dataset, batch_size=6, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=False)
+    train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, collate_fn=collate_fn, num_workers=0, pin_memory=False)
+    val_loader = DataLoader(val_dataset, batch_size=6, shuffle=False, collate_fn=collate_fn, num_workers=0, pin_memory=False)
 
     # ==========================================
     # 5. OWOD Network and Optimizer Initialization
@@ -259,53 +253,6 @@ def main():
             # CRITICAL MEMORY LEAK FIX: Force Python to delete variables.
             # Do NOT use gc.collect() here because it breaks PyTorch DataLoader multiprocessing queues!
             del images, targets, loss_dict, losses
-
-            # Visto che num_workers=0, POSSIAMO usare gc.collect() senza rompere nulla!
-            # Questo distruggerà eventuali reference cicliche (es. repliche DataParallel).
-            gc.collect()
-
-            # CLEAR AUTOCAST CACHE: previene memory leak dei thread di DataParallel!
-            torch.clear_autocast_cache()
-
-            # NUCLEAR OPTION FOR CPU RAM: Force glibc to return fragmented memory to the Linux kernel!
-            # MobileSAM creates thousands of temporary objects, which fragments the C allocator.
-            try:
-                ctypes.CDLL('libc.so.6').malloc_trim(0)
-            except Exception:
-                pass
-
-            # --- PROFILER DOP 100 ITERAZIONI ---
-            if i == 100:
-                print(f"\n[PROFILER ATTIVATO] Raggiunta l'iterazione 100. Analizzo la memoria...")
-                tensor_count = 0
-                total_bytes = 0
-                for obj in gc.get_objects():
-                    try:
-                        if torch.is_tensor(obj):
-                            tensor_count += 1
-                            if obj.device.type == 'cpu':
-                                total_bytes += obj.numel() * obj.element_size()
-                    except Exception:
-                        pass
-                print(f"--> [PYTORCH] Trovati {tensor_count} Tensori vivi in Python. Spazio TOTALE su CPU: {total_bytes / (1024**3):.4f} GB")
-                
-                import collections
-                counts = collections.Counter(type(o).__name__ for o in gc.get_objects())
-                print(f"--> [PYTHON] Top 5 Oggetti più numerosi: {counts.most_common(5)}\n")
-            # -------------------------------
-            # --- RAM GUARDIAN ---
-            process = psutil.Process(os.getpid())
-            mem_info = process.memory_info()
-            ram_gb = mem_info.rss / (1024 ** 3)
-            
-            if ram_gb > 20.0:
-                print(f"\n[RAM GUARDIAN] Alert! RAM is at {ram_gb:.2f} GB. Forcing emergency flush...")
-                gc.collect()
-                try:
-                    ctypes.CDLL('libc.so.6').malloc_trim(0)
-                except Exception:
-                    pass
-            # --------------------
             
         num_batches_train = len(train_loader)
         train_avg = {k: v / num_batches_train for k, v in train_loss_sums.items()}
@@ -314,14 +261,10 @@ def main():
               f"Box: {train_avg['loss_box_reg']:.4f}, RPNBox: {train_avg['loss_rpn_box_reg']:.4f}, "
               f"URM: {train_avg['loss_b_unk']:.4f}, ET: {train_avg['loss_et']:.4f})")
               
-        # Aggiorniamo il learning rate a fine epoca
         scheduler.step()
         print(f"Current Learning Rate: {scheduler.get_last_lr()[0]}")
         
-        # ==========================================
-        # VALIDATION LOOP
-        # ==========================================
-        model.train() # FastRCNN calculates val losses only in train mode
+        model.train()
         val_loss_sums = {'total': 0.0, 'loss_classifier': 0.0, 'loss_box_reg': 0.0, 
                          'loss_objectness': 0.0, 'loss_rpn_box_reg': 0.0, 
                          'loss_b_unk': 0.0, 'loss_et': 0.0}
@@ -342,27 +285,6 @@ def main():
 
                 # CRITICAL MEMORY LEAK FIX: Force Python to delete variables in val loop too
                 del images, targets, loss_dict, losses
-                gc.collect()
-                torch.clear_autocast_cache()
-                
-                try:
-                    ctypes.CDLL('libc.so.6').malloc_trim(0)
-                except Exception:
-                    pass
-
-                # --- RAM GUARDIAN ---
-                process = psutil.Process(os.getpid())
-                mem_info = process.memory_info()
-                ram_gb = mem_info.rss / (1024 ** 3)
-                
-                if ram_gb > 20.0:
-                    print(f"\n[RAM GUARDIAN] Alert! RAM is at {ram_gb:.2f} GB. Forcing emergency flush...")
-                    gc.collect()
-                    try:
-                        ctypes.CDLL('libc.so.6').malloc_trim(0)
-                    except Exception:
-                        pass
-                # --------------------
                 
         num_batches_val = len(val_loader)
         val_avg = {k: v / num_batches_val for k, v in val_loss_sums.items()}
