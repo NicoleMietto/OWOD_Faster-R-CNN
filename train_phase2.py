@@ -84,6 +84,16 @@ def main():
     print("Loading DINOv2 (ViT-Small)...")
     import logging
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+    
+    # CRITICAL FIX FOR 64MB/BATCH MEMORY LEAK:
+    # Kaggle installs `xformers` by default. DINOv2 automatically uses it.
+    # When `xformers` is used inside PyTorch DataParallel, its C++ backend creates
+    # thread-local memory caches for attention that are NEVER freed, leaking ~60MB of CPU RAM per batch!
+    # By tricking Python into thinking xformers is not installed, DINOv2 falls back
+    # to PyTorch's native SDPA (Scaled Dot Product Attention), which is memory-safe!
+    import sys
+    sys.modules['xformers'] = None
+    
     dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14', verbose=False, skip_validation=True)
     dinov2 = dinov2.to(device)
     dinov2.eval()
