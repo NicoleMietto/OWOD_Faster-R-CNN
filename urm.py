@@ -7,6 +7,11 @@ import torch.nn.functional as F
 # !pip install git+https://github.com/ChaoningZhang/MobileSAM.git
 from mobile_sam import sam_model_registry
 
+# GLOBAL CACHE to prevent DataParallel from deepcopying MobileSAM every forward pass!
+# This is the root cause of the 30GB CPU RAM leak. DataParallel replicates all submodules
+# every batch. MobileSAM is huge and complex, causing massive Python object fragmentation.
+_SAM_MODELS_CACHE = {}
+
 class UnknownBoxRefineModule(nn.Module):
     """
     URM Module: Refines unknown bounding boxes using MobileSAM.
@@ -16,22 +21,29 @@ class UnknownBoxRefineModule(nn.Module):
         super().__init__()
         self.device = device
         self.iou_filter_thresh = iou_filter_thresh
+        self.sam_checkpoint_path = sam_checkpoint_path
         
-        # 1. Load MobileSAM (ViT-Tiny to save VRAM on Kaggle)
-        model_type = "vit_t"
-        self.sam = sam_model_registry[model_type](checkpoint=sam_checkpoint_path)
-        self.sam.to(device=self.device)
-        self.sam.eval() # SAM acts as a "teacher", it is always in eval mode
-        
-        # Explicitly freeze all weights to save memory on gradients
-        for param in self.sam.parameters():
-            param.requires_grad = False
+        # Preload the model on the primary device
+        self._load_sam(device)
 
         # Register normalization constants as buffers to prevent CPU memory leaks in DataParallel threads
         self.register_buffer('img_mean', torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1))
         self.register_buffer('img_std', torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1))
         self.register_buffer('pixel_mean', torch.tensor([123.675, 116.28, 103.53]).view(1, 3, 1, 1))
         self.register_buffer('pixel_std', torch.tensor([58.395, 57.12, 57.375]).view(1, 3, 1, 1))
+
+    def _load_sam(self, target_device):
+        device_str = str(target_device)
+        if device_str not in _SAM_MODELS_CACHE:
+            model_type = "vit_t"
+            sam = sam_model_registry[model_type](checkpoint=self.sam_checkpoint_path)
+            sam.to(device=target_device)
+            sam.eval() # SAM acts as a "teacher", it is always in eval mode
+            # Explicitly freeze all weights to save memory on gradients
+            for param in sam.parameters():
+                param.requires_grad = False
+            _SAM_MODELS_CACHE[device_str] = sam
+        return _SAM_MODELS_CACHE[device_str]
 
     def forward(self, top_unknown_boxes, raw_image_tensor):
         """
@@ -48,10 +60,13 @@ class UnknownBoxRefineModule(nn.Module):
         # If RPN did not find any unknown, do nothing
         if len(top_unknown_boxes) == 0:
             return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device)
+
+        # Dynamically load/fetch the SAM model for the current GPU
+        sam = self._load_sam(current_device)
             
         # --- STATELESS SAM INFERENCE (Prevents CPU/GPU Memory Leaks) ---
         # 1. Pure GPU Pipeline: Resize image directly on GPU
-        target_length = self.sam.image_encoder.img_size # usually 1024
+        target_length = sam.image_encoder.img_size # usually 1024
         
         # Reverse the normalization formula: (img * std) + mean
         mean = self.img_mean.to(current_device)
@@ -78,23 +93,24 @@ class UnknownBoxRefineModule(nn.Module):
         ratio_h = new_size[0] / original_h
         ratio_w = new_size[1] / original_w
         
-        input_boxes_torch = top_unknown_boxes.clone()
+        # CRITICAL: Detach the boxes before feeding to SAM to prevent graph retention!
+        input_boxes_torch = top_unknown_boxes.detach().clone()
         input_boxes_torch[:, [0, 2]] *= ratio_w
         input_boxes_torch[:, [1, 3]] *= ratio_h
         
         # Inference without gradients
         with torch.no_grad():
-            features = self.sam.image_encoder(input_image)
+            features = sam.image_encoder(input_image)
             
-            sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
+            sparse_embeddings, dense_embeddings = sam.prompt_encoder(
                 points=None,
                 boxes=input_boxes_torch,
                 masks=None,
             )
             
-            low_res_masks, iou_predictions = self.sam.mask_decoder(
+            low_res_masks, iou_predictions = sam.mask_decoder(
                 image_embeddings=features,
-                image_pe=self.sam.prompt_encoder.get_dense_pe(),
+                image_pe=sam.prompt_encoder.get_dense_pe(),
                 sparse_prompt_embeddings=sparse_embeddings,
                 dense_prompt_embeddings=dense_embeddings,
                 multimask_output=False,
@@ -108,9 +124,9 @@ class UnknownBoxRefineModule(nn.Module):
             # 'masks' has dimension [K, 1, H, W]
         
         # --- STEP 3: Generation of New Bounding Boxes ---
-        # A mask might be completely empty (SAM didn't find anything).
-        # masks_to_boxes crashes on empty masks. We must filter them first.
-        mask_bool = masks[:, 0]
+        # CRITICAL FIX: Convert float logits to boolean mask! 
+        # masks_to_boxes expects boolean. If float is passed, it sees all non-zero floats as True, returning the whole image!
+        mask_bool = masks[:, 0] > 0.0
         valid_mask_idx = mask_bool.view(mask_bool.shape[0], -1).any(dim=1)
         
         # Ensure the boolean mask is on the correct GPU before indexing
