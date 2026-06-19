@@ -105,8 +105,8 @@ def main():
     # BATCH SIZE DIMEZZATO A 4 PER LA FASE 2 (URM)
     # 2 immagini andranno a GPU 0 e 2 immagini a GPU 1.
     # Abbiamo impostato num_workers=0 e pin_memory=False per annientare QUALSIASI memory leak della CPU!
-    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn, num_workers=0, pin_memory=False)
-    val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn, num_workers=0, pin_memory=False)
+    train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, collate_fn=collate_fn, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=6, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=True)
 
     # ==========================================
     # 5. OWOD Network and Optimizer Initialization
