@@ -1,15 +1,21 @@
+import os
+# NUCLEAR FIX FOR LINUX GLIBC FRAGMENTATION
+# This forces glibc to use only 2 arenas, preventing massive memory fragmentation 
+# caused by multithreading (DataParallel) when creating thousands of tensors.
+os.environ['MALLOC_ARENA_MAX'] = '2'
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import os
 import csv
 import random
 import numpy as np
 import warnings
 import gc
 import ctypes
+import psutil
 
 # Suppress warnings to prevent Jupyter IOPub RAM leaks from spammy PyTorch warnings!
 warnings.filterwarnings("ignore")
@@ -267,6 +273,20 @@ def main():
                 ctypes.CDLL('libc.so.6').malloc_trim(0)
             except Exception:
                 pass
+
+            # --- RAM GUARDIAN ---
+            process = psutil.Process(os.getpid())
+            mem_info = process.memory_info()
+            ram_gb = mem_info.rss / (1024 ** 3)
+            
+            if ram_gb > 20.0:
+                print(f"\n[RAM GUARDIAN] Alert! RAM is at {ram_gb:.2f} GB. Forcing emergency flush...")
+                gc.collect()
+                try:
+                    ctypes.CDLL('libc.so.6').malloc_trim(0)
+                except Exception:
+                    pass
+            # --------------------
             
         num_batches_train = len(train_loader)
         train_avg = {k: v / num_batches_train for k, v in train_loss_sums.items()}
@@ -310,6 +330,20 @@ def main():
                     ctypes.CDLL('libc.so.6').malloc_trim(0)
                 except Exception:
                     pass
+
+                # --- RAM GUARDIAN ---
+                process = psutil.Process(os.getpid())
+                mem_info = process.memory_info()
+                ram_gb = mem_info.rss / (1024 ** 3)
+                
+                if ram_gb > 20.0:
+                    print(f"\n[RAM GUARDIAN] Alert! RAM is at {ram_gb:.2f} GB. Forcing emergency flush...")
+                    gc.collect()
+                    try:
+                        ctypes.CDLL('libc.so.6').malloc_trim(0)
+                    except Exception:
+                        pass
+                # --------------------
                 
         num_batches_val = len(val_loader)
         val_avg = {k: v / num_batches_val for k, v in val_loss_sums.items()}
