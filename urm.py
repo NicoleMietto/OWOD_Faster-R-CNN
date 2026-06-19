@@ -7,11 +7,6 @@ import torch.nn.functional as F
 # !pip install git+https://github.com/ChaoningZhang/MobileSAM.git
 from mobile_sam import sam_model_registry
 
-# GLOBAL CACHE to prevent DataParallel from deepcopying MobileSAM every forward pass!
-# This is the root cause of the 30GB CPU RAM leak. DataParallel replicates all submodules
-# every batch. MobileSAM is huge and complex, causing massive Python object fragmentation.
-_SAM_MODELS_CACHE = {}
-
 class UnknownBoxRefineModule(nn.Module):
     """
     URM Module: Refines unknown bounding boxes using MobileSAM.
@@ -19,12 +14,17 @@ class UnknownBoxRefineModule(nn.Module):
     """
     def __init__(self, sam_checkpoint_path, device='cuda', iou_filter_thresh=0.5):
         super().__init__()
-        self.device = device
-        self.iou_filter_thresh = iou_filter_thresh
         self.sam_checkpoint_path = sam_checkpoint_path
-        
-        # Preload the model on the primary device
-        self._load_sam(device)
+        self.iou_filter_thresh = iou_filter_thresh
+
+        # Inizializziamo SAM DIRETTAMENTE in self.
+        # Questo permette a DataParallel di replicarlo correttamente senza rompere il context C++ di PyTorch!
+        model_type = "vit_t"
+        self.sam = sam_model_registry[model_type](checkpoint=self.sam_checkpoint_path)
+        self.sam.to(device=device)
+        self.sam.eval() # SAM acts as a "teacher", it is always in eval mode
+        for param in self.sam.parameters():
+            param.requires_grad = False
 
         # Register normalization constants as buffers to prevent CPU memory leaks in DataParallel threads
         self.register_buffer('img_mean', torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1))
@@ -32,18 +32,6 @@ class UnknownBoxRefineModule(nn.Module):
         self.register_buffer('pixel_mean', torch.tensor([123.675, 116.28, 103.53]).view(1, 3, 1, 1))
         self.register_buffer('pixel_std', torch.tensor([58.395, 57.12, 57.375]).view(1, 3, 1, 1))
 
-    def _load_sam(self, target_device):
-        device_str = str(target_device)
-        if device_str not in _SAM_MODELS_CACHE:
-            model_type = "vit_t"
-            sam = sam_model_registry[model_type](checkpoint=self.sam_checkpoint_path)
-            sam.to(device=target_device)
-            sam.eval() # SAM acts as a "teacher", it is always in eval mode
-            # Explicitly freeze all weights to save memory on gradients
-            for param in sam.parameters():
-                param.requires_grad = False
-            _SAM_MODELS_CACHE[device_str] = sam
-        return _SAM_MODELS_CACHE[device_str]
 
     def forward(self, top_unknown_boxes, raw_image_tensor):
         """
@@ -100,17 +88,17 @@ class UnknownBoxRefineModule(nn.Module):
         
         # Inference without gradients
         with torch.no_grad():
-            features = sam.image_encoder(input_image)
+            features = self.sam.image_encoder(input_image)
             
-            sparse_embeddings, dense_embeddings = sam.prompt_encoder(
+            sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
                 points=None,
                 boxes=input_boxes_torch,
                 masks=None,
             )
             
-            low_res_masks, iou_predictions = sam.mask_decoder(
+            low_res_masks, iou_predictions = self.sam.mask_decoder(
                 image_embeddings=features,
-                image_pe=sam.prompt_encoder.get_dense_pe(),
+                image_pe=self.sam.prompt_encoder.get_dense_pe(),
                 sparse_prompt_embeddings=sparse_embeddings,
                 dense_prompt_embeddings=dense_embeddings,
                 multimask_output=False,
