@@ -254,6 +254,10 @@ def main():
             # Do NOT use gc.collect() here because it breaks PyTorch DataLoader multiprocessing queues!
             del images, targets, loss_dict, losses
 
+            # Visto che num_workers=0, POSSIAMO usare gc.collect() senza rompere nulla!
+            # Questo distruggerà eventuali reference cicliche (es. repliche DataParallel).
+            gc.collect()
+
             # NUCLEAR OPTION FOR CPU RAM: Force glibc to return fragmented memory to the Linux kernel!
             # MobileSAM creates thousands of temporary objects, which fragments the C allocator.
             try:
@@ -296,6 +300,7 @@ def main():
 
                 # CRITICAL MEMORY LEAK FIX: Force Python to delete variables in val loop too
                 del images, targets, loss_dict, losses
+                gc.collect()
                 
                 try:
                     ctypes.CDLL('libc.so.6').malloc_trim(0)
