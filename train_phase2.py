@@ -258,6 +258,9 @@ def main():
             # Questo distruggerà eventuali reference cicliche (es. repliche DataParallel).
             gc.collect()
 
+            # CLEAR AUTOCAST CACHE: previene memory leak dei thread di DataParallel!
+            torch.clear_autocast_cache()
+
             # NUCLEAR OPTION FOR CPU RAM: Force glibc to return fragmented memory to the Linux kernel!
             # MobileSAM creates thousands of temporary objects, which fragments the C allocator.
             try:
@@ -301,6 +304,7 @@ def main():
                 # CRITICAL MEMORY LEAK FIX: Force Python to delete variables in val loop too
                 del images, targets, loss_dict, losses
                 gc.collect()
+                torch.clear_autocast_cache()
                 
                 try:
                     ctypes.CDLL('libc.so.6').malloc_trim(0)
