@@ -68,4 +68,7 @@ class EmbeddingTransferModule(nn.Module):
         matrix_sum = (pull_loss + push_loss).sum()
         L_et = matrix_sum / N
 
+        # Sicurezza anti-leak: deallochiamo esplicitamente tutti i tensori intermedi
+        del aligned_dino_features, source_embeddings, dist_S, W, dist_Z, pull_loss, push_loss, matrix_sum
+        
         return L_et
