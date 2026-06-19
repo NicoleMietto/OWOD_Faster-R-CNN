@@ -274,6 +274,25 @@ def main():
             except Exception:
                 pass
 
+            # --- PROFILER DOP 100 ITERAZIONI ---
+            if i == 100:
+                print(f"\n[PROFILER ATTIVATO] Raggiunta l'iterazione 100. Analizzo la memoria...")
+                tensor_count = 0
+                total_bytes = 0
+                for obj in gc.get_objects():
+                    try:
+                        if torch.is_tensor(obj):
+                            tensor_count += 1
+                            if obj.device.type == 'cpu':
+                                total_bytes += obj.numel() * obj.element_size()
+                    except Exception:
+                        pass
+                print(f"--> [PYTORCH] Trovati {tensor_count} Tensori vivi in Python. Spazio TOTALE su CPU: {total_bytes / (1024**3):.4f} GB")
+                
+                import collections
+                counts = collections.Counter(type(o).__name__ for o in gc.get_objects())
+                print(f"--> [PYTHON] Top 5 Oggetti più numerosi: {counts.most_common(5)}\n")
+            # -------------------------------
             # --- RAM GUARDIAN ---
             process = psutil.Process(os.getpid())
             mem_info = process.memory_info()
