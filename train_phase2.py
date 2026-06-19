@@ -8,6 +8,8 @@ import csv
 import random
 import numpy as np
 import warnings
+import gc
+import ctypes
 
 # Suppress warnings to prevent Jupyter IOPub RAM leaks from spammy PyTorch warnings!
 warnings.filterwarnings("ignore")
@@ -251,6 +253,13 @@ def main():
             # CRITICAL MEMORY LEAK FIX: Force Python to delete variables.
             # Do NOT use gc.collect() here because it breaks PyTorch DataLoader multiprocessing queues!
             del images, targets, loss_dict, losses
+
+            # NUCLEAR OPTION FOR CPU RAM: Force glibc to return fragmented memory to the Linux kernel!
+            # MobileSAM creates thousands of temporary objects, which fragments the C allocator.
+            try:
+                ctypes.CDLL('libc.so.6').malloc_trim(0)
+            except Exception:
+                pass
             
         num_batches_train = len(train_loader)
         train_avg = {k: v / num_batches_train for k, v in train_loss_sums.items()}
@@ -284,6 +293,14 @@ def main():
                         val_loss_sums[k] += v.mean().item()
                         
                 val_loop.set_postfix(val_loss=losses.item())
+
+                # CRITICAL MEMORY LEAK FIX: Force Python to delete variables in val loop too
+                del images, targets, loss_dict, losses
+                
+                try:
+                    ctypes.CDLL('libc.so.6').malloc_trim(0)
+                except Exception:
+                    pass
                 
         num_batches_val = len(val_loader)
         val_avg = {k: v / num_batches_val for k, v in val_loss_sums.items()}
