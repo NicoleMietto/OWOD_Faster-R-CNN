@@ -27,6 +27,12 @@ class UnknownBoxRefineModule(nn.Module):
         for param in self.sam.parameters():
             param.requires_grad = False
 
+        # Register normalization constants as buffers to prevent CPU memory leaks in DataParallel threads
+        self.register_buffer('img_mean', torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1))
+        self.register_buffer('img_std', torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1))
+        self.register_buffer('pixel_mean', torch.tensor([123.675, 116.28, 103.53]).view(1, 3, 1, 1))
+        self.register_buffer('pixel_std', torch.tensor([58.395, 57.12, 57.375]).view(1, 3, 1, 1))
+
     def forward(self, top_unknown_boxes, raw_image_tensor):
         """
         Args:
@@ -48,8 +54,8 @@ class UnknownBoxRefineModule(nn.Module):
         target_length = self.sam.image_encoder.img_size # usually 1024
         
         # Reverse the normalization formula: (img * std) + mean
-        mean = torch.tensor([0.485, 0.456, 0.406], device=current_device).view(3, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225], device=current_device).view(3, 1, 1)
+        mean = self.img_mean.to(current_device)
+        std = self.img_std.to(current_device)
         unnorm_img = (raw_image_tensor * std) + mean
         
         original_h, original_w = unnorm_img.shape[1], unnorm_img.shape[2]
@@ -60,8 +66,8 @@ class UnknownBoxRefineModule(nn.Module):
         transformed_img = F.interpolate(unnorm_img_255, size=new_size, mode='bilinear', align_corners=False)
         
         # 2. SAM Preprocess (Normalize and Pad)
-        pixel_mean = torch.tensor([123.675, 116.28, 103.53], device=current_device).view(1, 3, 1, 1)
-        pixel_std = torch.tensor([58.395, 57.12, 57.375], device=current_device).view(1, 3, 1, 1)
+        pixel_mean = self.pixel_mean.to(current_device)
+        pixel_std = self.pixel_std.to(current_device)
         x = (transformed_img - pixel_mean) / pixel_std
         
         padh = target_length - x.shape[2]
@@ -145,5 +151,9 @@ class UnknownBoxRefineModule(nn.Module):
         
         # Combined total loss (as in the original paper)
         loss_b_unk = loss_l1 + loss_giou 
+
+        # Immediate cleanup of intermediate tensors to prevent CPU/GPU RAM accumulation
+        del features, sparse_embeddings, dense_embeddings, low_res_masks, iou_predictions, masks
+        del input_image, transformed_img, unnorm_img_255, unnorm_img, x
         
         return valid_sam_boxes, loss_b_unk
