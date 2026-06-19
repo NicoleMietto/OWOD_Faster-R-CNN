@@ -5,18 +5,15 @@ import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import roi_align
 from torchvision.models.detection.rpn import RegionProposalNetwork
-
 class CustomRPN(RegionProposalNetwork):
     def filter_proposals(self, proposals, objectness, image_shapes, num_anchors_per_level):
         boxes, scores = super().filter_proposals(proposals, objectness, image_shapes, num_anchors_per_level)
         self.rpn_scores = scores
         return boxes, scores
-
 # Import external modules
 from labeler import OWOD_Labeler
 from urm import UnknownBoxRefineModule
 from etm import EmbeddingTransferModule
-
 class EmbeddingHead(nn.Module):
     """
     This is the core of YOUR experiment. 
@@ -47,10 +44,8 @@ class EmbeddingHead(nn.Module):
                 nn.ReLU(),
                 nn.Linear(1024, embedding_dim)
             )
-
     def forward(self, x):
         return self.network(x)
-
 class OWODFasterRCNN(nn.Module):
     def __init__(self, num_known_classes, use_spatial_cnn=True, alpha=0.1, beta=1.0):
         super().__init__()
@@ -75,7 +70,6 @@ class OWODFasterRCNN(nn.Module):
         # Note: We remove the +2 to not create useless output nodes.
         in_features = self.detector.roi_heads.box_predictor.cls_score.in_features
         self.detector.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_known_classes + 1)
-
         # 3. MAGIC TRICK: Capture RPN objectness scores
         # We change the class of the existing RPN to our CustomRPN dynamically.
         # This safely survives DataParallel deepcopying without closure bugs!
@@ -115,7 +109,6 @@ class OWODFasterRCNN(nn.Module):
         
         # Removed sequential DINOv2 feature extraction here. 
         # It is now computed internally after Faster R-CNN transformations to guarantee coordinate alignment.
-
         if self.training:
             # --- PHASE 1: Feature Extraction & RPN ---
             images_list, targets_list = self.detector.transform(images, targets)
@@ -209,7 +202,6 @@ class OWODFasterRCNN(nn.Module):
                 # --- PHASE 4: Prepare Boxes for ETM ---
                 valid_boxes_for_etm = torch.cat([pred_known_boxes, refined_unknowns])
                 all_valid_boxes.append(valid_boxes_for_etm)
-
             # --- PHASE 5: ETM (Batched Processing) ---
             if self.use_etm and batched_dino_features is not None:
                 total_boxes = sum(len(b) for b in all_valid_boxes)
@@ -234,7 +226,6 @@ class OWODFasterRCNN(nn.Module):
                             total_loss_et = total_loss_et + loss_et
                 
                 # The RoI head will only train on the original known classes.
-
             # --- PHASE 6: Standard RoI Head (Mild Detection) ---
             # We feed ALL RPN proposals and the ORIGINAL targets to the base network.
             # It will compute classification and regression losses ONLY for known classes.
@@ -250,9 +241,6 @@ class OWODFasterRCNN(nn.Module):
             
             # CRITICAL MEMORY LEAK FIX: Clear the cached scores to break the computation graph reference cycle
             self.detector.rpn.rpn_scores = []
-
-            # CLEAR AUTOCAST CACHE in the worker thread to prevent memory leak
-            torch.clear_autocast_cache()
             
             return total_losses
             
@@ -263,7 +251,6 @@ class OWODFasterRCNN(nn.Module):
             for img in images:
                 val = img.shape[-2:]
                 original_image_sizes.append((val[0], val[1]))
-
             # 2. Extract features and RPN proposals
             images_list, _ = self.detector.transform(images, None)
             features = self.detector.backbone(images_list.tensors)

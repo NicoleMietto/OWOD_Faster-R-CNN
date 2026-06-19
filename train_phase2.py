@@ -324,6 +324,13 @@ def main():
                 print("Early Stopping triggered! Training interrupted.")
                 break
         
+        import ctypes
+        try:
+            ctypes.CDLL('libc.so.6').malloc_trim(0)
+            print("C++ RAM (DataParallel Garbage) successfully trimmed!")
+        except Exception:
+            pass
+        
         torch.cuda.empty_cache()
 
 if __name__ == "__main__":
