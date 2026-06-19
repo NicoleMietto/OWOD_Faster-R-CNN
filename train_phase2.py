@@ -203,8 +203,9 @@ def main():
 
     # ==========================================
     # 7. TRAINING LOOP 
-    # ==========================================
-    scaler = torch.cuda.amp.GradScaler() 
+    # ==========================================    
+    # Rimuoviamo lo scaler AMP (autocast) per evitare memory leak con DataParallel
+    # scaler = torch.cuda.amp.GradScaler() 
     
     for epoch in range(start_epoch, num_epochs):
         if epoch < 4:
@@ -242,20 +243,18 @@ def main():
             # We no longer pre-compute DINOv2 features here! 
             # We let the DataParallel GPUs do it in parallel inside the model forward.
             
-            # Autocast is now handled inside the model's forward method!
+            # Compute forward pass WITHOUT autocast to avoid DataParallel TLS memory leaks
             loss_dict = model(images, targets, None)
             
             # MULTI-GPU: loss_dict contiene array di loss (una per GPU). Usiamo .mean() per unificarle!
             losses = sum(loss.mean() for loss in loss_dict.values())
             
             optimizer.zero_grad()
-            scaler.scale(losses).backward()
+            losses.backward()
             
-            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
             
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
             
             train_loss_sums['total'] += losses.item()
             for k, v in loss_dict.items():

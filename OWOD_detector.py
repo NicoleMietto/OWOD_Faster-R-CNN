@@ -96,7 +96,6 @@ class OWODFasterRCNN(nn.Module):
         self.urm = UnknownBoxRefineModule(sam_checkpoint_path=sam_path, device='cuda' if torch.cuda.is_available() else 'cpu')
         self.etm = EmbeddingTransferModule()
         
-    @torch.cuda.amp.autocast()
     def forward(self, images, targets=None, dino_features_list=None):
         """
         Args:
@@ -241,6 +240,8 @@ class OWODFasterRCNN(nn.Module):
             
             # CRITICAL MEMORY LEAK FIX: Clear the cached scores to break the computation graph reference cycle
             self.detector.rpn.rpn_scores = []
+            if hasattr(self.detector.roi_heads.box_roi_pool, 'cached_roi_features'):
+                self.detector.roi_heads.box_roi_pool.cached_roi_features = None
             
             return total_losses
             
