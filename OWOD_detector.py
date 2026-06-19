@@ -250,6 +250,9 @@ class OWODFasterRCNN(nn.Module):
             
             # CRITICAL MEMORY LEAK FIX: Clear the cached scores to break the computation graph reference cycle
             self.detector.rpn.rpn_scores = []
+
+            # CLEAR AUTOCAST CACHE in the worker thread to prevent memory leak
+            torch.clear_autocast_cache()
             
             return total_losses
             
