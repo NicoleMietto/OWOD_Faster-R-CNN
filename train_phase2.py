@@ -71,6 +71,9 @@ def collate_fn(batch):
     return tuple(zip(*batch))
 
 def main():
+    import tracemalloc
+    tracemalloc.start()
+    
     set_seed(42)
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f"Starting training on: {device}")
@@ -81,7 +84,7 @@ def main():
     print("Loading DINOv2 (ViT-Small)...")
     import logging
     logging.getLogger("urllib3").setLevel(logging.WARNING)
-    dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14', verbose=False)
+    dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14', verbose=False, skip_validation=True)
     dinov2 = dinov2.to(device)
     dinov2.eval()
     for param in dinov2.parameters():
@@ -253,6 +256,35 @@ def main():
             # CRITICAL MEMORY LEAK FIX: Force Python to delete variables.
             # Do NOT use gc.collect() here because it breaks PyTorch DataLoader multiprocessing queues!
             del images, targets, loss_dict, losses
+            
+            # --- MEMORY PROFILING IN REAL TIME ---
+            if i % 50 == 0 and i > 0:
+                import psutil
+                import tracemalloc
+                import ctypes
+                import gc
+                
+                process = psutil.Process(os.getpid())
+                mem_mb_before = process.memory_info().rss / 1024 / 1024
+                print(f"\n--- BATCH {i} MEMORY DIAGNOSTICS ---")
+                print(f"Total OS RAM Used by Process: {mem_mb_before:.1f} MB")
+                
+                snapshot = tracemalloc.take_snapshot()
+                top_stats = snapshot.statistics('lineno')
+                print("[Python] Top 5 memory hogs:")
+                for stat in top_stats[:5]:
+                    print(stat)
+                
+                # Tentativo di spurgo forzato in tempo reale (C++ e Python)
+                gc.collect()
+                try:
+                    ctypes.CDLL('libc.so.6').malloc_trim(0)
+                except Exception:
+                    pass
+                
+                mem_mb_after = process.memory_info().rss / 1024 / 1024
+                print(f"Total OS RAM After GC & Trim: {mem_mb_after:.1f} MB")
+                print("------------------------------------\n")
             
         num_batches_train = len(train_loader)
         train_avg = {k: v / num_batches_train for k, v in train_loss_sums.items()}
