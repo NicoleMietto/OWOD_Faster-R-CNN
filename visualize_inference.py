@@ -5,7 +5,7 @@ from torchvision.transforms import functional as F
 from OWOD_detector import OWODFasterRCNN
 import os
 import json
-#import config
+import matplotlib.pyplot as plt
 
 def main():
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -13,59 +13,78 @@ def main():
 
     # 1. Modelli da testare
     checkpoints_to_test = {
-        "best_model": "/kaggle/working/best_model.pth",
-        "last_model": "/kaggle/working/owod_model_last.pth"  # O sostituisci con owod_model_epoch_12.pth
+        "Best Model (Epoche 1-7)": "/kaggle/working/best_model.pth",
+        "Last Model (Epoca 12 - Open World)": "/kaggle/working/owod_model_epoch_12.pth"
     }
     
-    # 2. Carichiamo le immagini dal json di TEST
-    json_path = "/kaggle/working/task1_10cls_uu_test.json"
-    if not os.path.exists(json_path):
-        print(f"❌ Errore: {json_path} non trovato. Provo a usare il json di validazione...")
-        json_path = "/kaggle/working/task1_10cls_uu_val.json"
-        if not os.path.exists(json_path):
-             return
+    # 2. Creiamo un Test Split "Al volo" dal VERO COCO validation set (che non è mai stato usato per train/val)
+    coco_val_path = "/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/annotations/instances_val2017.json"
+    if not os.path.exists(coco_val_path):
+        print(f"❌ Errore: {coco_val_path} non trovato!")
+        return
 
-    with open(json_path, 'r') as f:
+    with open(coco_val_path, 'r') as f:
         data = json.load(f)
+        
+    # Le nostre 10 classi note
+    known_classes = {1, 3, 5, 17, 27, 44, 52, 62, 72, 84}
+    
+    # Raggruppiamo le annotazioni per immagine
+    img_to_anns = {img['id']: [] for img in data['images']}
+    for ann in data['annotations']:
+        img_to_anns[ann['image_id']].append(ann)
 
-    # Prendiamo 15 immagini fisse per avere un confronto diretto 1-a-1
-    images_to_test = data['images'][:15]
+    # Troviamo immagini che hanno ALMENO una classe nota (regola OWOD)
+    images_to_test = []
+    for img in data['images']:
+        anns = img_to_anns[img['id']]
+        if any(ann['category_id'] in known_classes for ann in anns):
+            images_to_test.append(img)
+            if len(images_to_test) >= 10:
+                break
     img_dir = "/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/val2017"
     
-    # 3. Iteriamo sui vari pesi per testarli entrambi
-    for model_name, model_path in checkpoints_to_test.items():
-        if not os.path.exists(model_path):
-            print(f"\n⚠️ Salto {model_name}: file {model_path} non trovato.")
+    # 3. Carichiamo entrambi i modelli IN MEMORIA
+    models = {}
+    for name, path in checkpoints_to_test.items():
+        if os.path.exists(path):
+            print(f"Caricamento {name} da {path}...")
+            model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True)
+            checkpoint = torch.load(path, map_location=device)
+            if 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+            else:
+                model.load_state_dict(checkpoint, strict=False)
+            model.to(device)
+            model.eval() # MODALITÀ INFERENZA
+            models[name] = model
+        else:
+            print(f"⚠️ ATTENZIONE: Modello {path} non trovato! Salto.")
+
+    if len(models) == 0:
+        print("❌ Nessun modello caricato. Interruzione.")
+        return
+
+    output_dir = "/kaggle/working/visual_test_comparisons"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 4. Iteriamo sulle immagini
+    print("\nInizio inferenza e generazione grafici...")
+    for img_info in images_to_test:
+        img_path = os.path.join(img_dir, img_info['file_name'])
+        if not os.path.exists(img_path):
             continue
             
-        print(f"\n" + "="*50)
-        print(f"TESTING MODELLO: {model_name}")
-        print(f"Caricamento pesi da: {model_path}")
-        print("="*50)
+        image = Image.open(img_path).convert("RGB")
+        image_tensor = F.to_tensor(image).to(device)
+        image_to_draw = (image_tensor.cpu() * 255).to(torch.uint8)
 
-        # Inizializza un modello fresco
-        model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True)
-        
-        checkpoint = torch.load(model_path, map_location=device)
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-        else:
-            model.load_state_dict(checkpoint, strict=False)
-            
-        model.to(device)
-        model.eval() # MODALITÀ INFERENZA
+        # Creiamo la figura Matplotlib per il Side-by-Side
+        fig, axes = plt.subplots(1, len(models), figsize=(12 * len(models), 12))
+        if len(models) == 1:
+            axes = [axes]
 
-        output_dir = f"/kaggle/working/visual_test_results/{model_name}"
-        os.makedirs(output_dir, exist_ok=True)
-
-        for img_info in images_to_test:
-            img_path = os.path.join(img_dir, img_info['file_name'])
-            if not os.path.exists(img_path):
-                continue
-                
-            image = Image.open(img_path).convert("RGB")
-            image_tensor = F.to_tensor(image).to(device)
-
+        for idx, (model_name, model) in enumerate(models.items()):
             with torch.no_grad():
                 detections = model([image_tensor]) 
             
@@ -74,21 +93,21 @@ def main():
             labels = pred['labels'].cpu()
             scores = pred['scores'].cpu()
 
-            image_to_draw = (image_tensor.cpu() * 255).to(torch.uint8)
             colors, text_labels, keep_boxes, keep_scores_list = [], [], [], []
             
-            # Filtro base (Soglia 60%)
+            # Filtro base (Soglia 50% per vedere più roba)
             for box, label, score in zip(boxes, labels, scores):
-                if score > 0.6: 
+                if score > 0.5: 
                     keep_boxes.append(box)
                     keep_scores_list.append(score)
                     
-                    if label.item() == 81:
+                    # 81 (o 21 a seconda del dataset) è l'etichetta fittizia per Unknown
+                    if label.item() == 81 or label.item() == 21 or label.item() == 11:
                         colors.append("red") 
-                        text_labels.append(f"UNK: {score:.2f}")
+                        text_labels.append(f"UNKNOWN: {score:.2f}")
                     else:
                         colors.append("green") 
-                        text_labels.append(f"KN {label.item()}: {score:.2f}")
+                        text_labels.append(f"Known {label.item()}: {score:.2f}")
             
             if len(keep_boxes) > 0:
                 keep_boxes = torch.stack(keep_boxes)
@@ -103,18 +122,23 @@ def main():
                 
                 drawn_image = torchvision.utils.draw_bounding_boxes(
                     image_to_draw, keep_boxes, labels=text_labels, 
-                    colors=colors, width=3, font_size=12
+                    colors=colors, width=4
                 )
             else:
                 drawn_image = image_to_draw
 
-            save_path = os.path.join(output_dir, f"{img_info['file_name']}")
             img_pil = F.to_pil_image(drawn_image)
-            img_pil.save(save_path)
+            axes[idx].imshow(img_pil)
+            axes[idx].set_title(model_name, fontsize=20, fontweight='bold')
+            axes[idx].axis('off')
             
-        print(f"✅ Salvate immagini in '{output_dir}'.")
-
-    print("\n🎉 Finito! Puoi confrontare le cartelle dentro 'visual_test_results/'.")
+        plt.tight_layout()
+        save_path = os.path.join(output_dir, f"compare_{img_info['file_name']}")
+        plt.savefig(save_path, bbox_inches='tight', dpi=150)
+        plt.close(fig)
+        
+    print(f"\n✅ Finito! Immagini comparative salvate nella cartella '{output_dir}'.")
+    print("Vai a vederle e cerca i riquadri ROSSI nell'ultimo modello!")
 
 if __name__ == "__main__":
     main()
