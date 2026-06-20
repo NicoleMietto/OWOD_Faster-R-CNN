@@ -14,7 +14,7 @@ def main():
     # 1. Modelli da testare
     checkpoints_to_test = {
         "Best Model (Epoche 1-7)": "/kaggle/working/best_model.pth",
-        "Last Model (Epoca 12 - Open World)": "/kaggle/working/owod_model_epoch_12.pth"
+        "Last Model (Epoca 12 - Open World)": "/kaggle/working/owod_model_last.pth"
     }
     
     # 2. Creiamo un Test Split "Al volo" dal VERO COCO validation set (che non è mai stato usato per train/val)
