@@ -63,8 +63,8 @@ def main():
     parser.add_argument('--epochs', type=int, default=5, help="Number of epochs to train for this run")
     parser.add_argument('--start_epoch', type=int, default=0, help="Starting epoch number (for logging and scheduler)")
     parser.add_argument('--resume', type=str, default=None, help="Path to checkpoint to resume from")
-    parser.add_argument('--alpha', type=float, default=0.1, help="ETM weight multiplier")
-    parser.add_argument('--beta', type=float, default=0.1, help="URM weight multiplier")
+    parser.add_argument('--alpha', type=float, default=0.1, help="URM weight multiplier")
+    parser.add_argument('--beta', type=float, default=0.1, help="ETM weight multiplier")
     parser.add_argument('--batch_size', type=int, default=6, help="Batch size")
     parser.add_argument('--lr', type=float, default=1e-4, help="Learning rate")
     parser.add_argument('--use_spatial_cnn', action='store_true', help="Use CNN instead of MLP for ETM")
@@ -163,7 +163,7 @@ def main():
             ])
 
     for epoch in range(args.start_epoch, args.start_epoch + args.epochs):
-        print(f"Epoch {epoch+1} - Configuration: Phase={args.phase}, ETM={base_model.use_etm} (alpha={args.alpha}), URM={base_model.use_urm} (beta={args.beta})")
+        print(f"Epoch {epoch+1} - Configuration: Phase={args.phase}, ETM={base_model.use_etm} (beta={args.beta}), URM={base_model.use_urm} (alpha={args.alpha})")
 
         model.train()
         train_loss_sums = {'total': 0.0, 'loss_classifier': 0.0, 'loss_box_reg': 0.0, 
