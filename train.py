@@ -103,13 +103,13 @@ def main():
 
     train_dataset = OWODDataset(
         img_dir='/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/train2017', 
-        annotation_file='/kaggle/working/task1_owod_train.json', 
+        annotation_file='task1_owod_train.json', 
         known_classes=[1, 3, 5, 17, 27, 44, 52, 62, 72, 84],
         transform=None 
     )
     val_dataset = OWODDataset(
         img_dir='/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/train2017', 
-        annotation_file='/kaggle/working/task1_owod_val.json', 
+        annotation_file='task1_owod_val.json', 
         known_classes=[1, 3, 5, 17, 27, 44, 52, 62, 72, 84],
         transform=None
     )
