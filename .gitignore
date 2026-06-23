@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTorch
+*.pth
+*.pt
+
+# Dataset e Annotazioni
+*.json
+!task1_owod_train.json
+!task1_owod_val.json
+
+# Log e Metriche
+*.csv
+training_metrics.csv
+
+# IDE e OS
+.vscode/
+.idea/
+.DS_Store
