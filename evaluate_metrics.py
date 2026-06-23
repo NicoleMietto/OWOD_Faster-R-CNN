@@ -10,11 +10,11 @@ from tqdm import tqdm
 
 from torchvision.ops import box_iou
 
-def evaluate_model(checkpoint_path, val_json_path, image_dir, device):
+def evaluate_model(checkpoint_path, val_json_path, image_dir, device, use_spatial_cnn=False):
     print(f"\n--- VALUTAZIONE UFFICIALE: {checkpoint_path} ---")
     
     # 1. Carica Modello
-    model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=True)
+    model = OWODFasterRCNN(num_known_classes=10, use_spatial_cnn=use_spatial_cnn)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'], strict=False)
@@ -42,9 +42,9 @@ def evaluate_model(checkpoint_path, val_json_path, image_dir, device):
     all_embeddings = []
     all_labels = []
 
-    print("Calcolo Metriche in corso sulle prime 500 immagini di validazione...")
+    print("Calcolo Metriche in corso su TUTTE le 5000 immagini di validazione (Test Finale!)...")
     
-    images_to_eval = data['images'][:500] # Usa 500 per fare veloce, metti len(data['images']) per test finale
+    images_to_eval = data['images'] # Valuta su tutto il dataset!
     
     for img_info in tqdm(images_to_eval):
         img_path = os.path.join(image_dir, img_info['file_name'])
@@ -147,10 +147,11 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to epoch_X.pth")
+    parser.add_argument("--use_spatial_cnn", action="store_true", help="Set if model was trained with CNN")
     args = parser.parse_args()
     
     val_json = "/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/annotations/instances_val2017.json"
     img_dir = "/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/val2017"
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     
-    evaluate_model(args.checkpoint, val_json, img_dir, device)
+    evaluate_model(args.checkpoint, val_json, img_dir, device, args.use_spatial_cnn)
