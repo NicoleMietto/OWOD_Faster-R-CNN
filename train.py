@@ -128,7 +128,8 @@ def main():
     
     params = [p for p in base_model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=1e-4)
-    scaler = torch.cuda.amp.GradScaler()
+    use_amp = (args.phase < 3)
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     
     # Scheduler: Drop LR at epoch 9 (fine-tuning URM stabilization)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=9, gamma=0.1)
@@ -173,19 +174,21 @@ def main():
         loop = tqdm(train_loader, desc=f"Epoch {epoch+1}", mininterval=30.0)
         
         for i, (images, targets) in enumerate(loop):
-            with torch.cuda.amp.autocast():
+            with torch.cuda.amp.autocast(enabled=use_amp):
                 loss_dict = model(images, targets, None)
                 losses = sum(loss.mean() for loss in loss_dict.values())
             
             optimizer.zero_grad()
-            scaler.scale(losses).backward()
-            
-            # Unscales the gradients of optimizer's assigned params in-place
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
-            
-            scaler.step(optimizer)
-            scaler.update()
+            if use_amp:
+                scaler.scale(losses).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                losses.backward()
+                torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
+                optimizer.step()
             
             train_loss_sums['total'] += losses.item()
             for k, v in loss_dict.items():
