@@ -128,7 +128,7 @@ def main():
     
     params = [p for p in base_model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=1e-4)
-    use_amp = (args.phase < 3)
+    use_amp = False # AMP disabilitato globalmente per velocità e stabilità
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     
     # Scheduler: Drop LR at epoch 9 (fine-tuning URM stabilization)
@@ -216,7 +216,7 @@ def main():
         
         with torch.no_grad():
             for images, targets in val_loop:
-                with torch.cuda.amp.autocast():
+                with torch.cuda.amp.autocast(enabled=use_amp):
                     loss_dict = model(images, targets, None)
                     losses = sum(loss.mean() for loss in loss_dict.values())
                 
