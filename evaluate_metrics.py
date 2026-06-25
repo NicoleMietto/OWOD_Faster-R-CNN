@@ -108,8 +108,15 @@ def evaluate_model(checkpoint_path, val_json_path, image_dir, device, use_spatia
         if len(gt_boxes_for_emb) > 0:
             gt_boxes_tensor = torch.tensor(gt_boxes_for_emb, dtype=torch.float32).to(device)
             with torch.no_grad():
-                features = model.detector.backbone(image_tensor.unsqueeze(0))
-                box_features = model.detector.roi_heads.box_roi_pool(features, [gt_boxes_tensor], [image_tensor.shape[-2:]])
+                # Creiamo un finto target per far sì che la transform di Faster RCNN
+                # scali i nostri bounding box coerentemente con il resize dell'immagine!
+                target = [{'boxes': gt_boxes_tensor, 'labels': torch.tensor(gt_labels_for_emb, device=device)}]
+                images_list, targets_list = model.detector.transform([image_tensor], target)
+                
+                features = model.detector.backbone(images_list.tensors)
+                # Usiamo le boxes trasformate (targets_list) e le vere dimensioni dell'immagine scalata
+                box_features = model.detector.roi_heads.box_roi_pool(features, [t['boxes'] for t in targets_list], images_list.image_sizes)
+                
                 embeddings = model.embedding_head(box_features)
                 all_embeddings.append(embeddings.cpu().numpy())
                 all_labels.extend(gt_labels_for_emb)

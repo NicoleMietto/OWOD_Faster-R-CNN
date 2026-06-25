@@ -30,6 +30,7 @@ class OWOD_Labeler:
                   "known_boxes": torch.empty((0, 4), device=proposals.device),
                   "known_labels": torch.empty((0,), dtype=torch.int64, device=proposals.device),
                   "unknown_boxes": proposals[is_obj],
+                  "unknown_scores": objectness_scores[is_obj],
                   "background_boxes": proposals[~is_obj]
               }
 

@@ -181,7 +181,7 @@ class OWODFasterRCNN(nn.Module):
                 filtered_unknowns = raw_unknowns[keep_idx]
                 
                 # Sort by objectness (take the ones the RPN is most confident about)
-                unk_scores = objectness_scores[i][keep_idx]
+                unk_scores = unk_scores[keep_idx]
                 _, sort_idx = unk_scores.sort(descending=True)
                 filtered_unknowns = filtered_unknowns[sort_idx]
                 
