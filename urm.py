@@ -25,15 +25,16 @@ class UnknownBoxRefineModule(nn.Module):
         for param in self.sam.parameters():
             param.requires_grad = False
             
-    def forward(self, top_unknown_boxes, raw_image_tensor):
+    def forward(self, top_unknown_boxes, raw_image_tensor, top_unk_scores=None):
         """
         Args:
             top_unknown_boxes (Tensor): [K, 4] bounding boxes coming from RPN (gradients are active).
             raw_image_tensor (Tensor): [3, H, W] the original image (RGB, range 0-255).
+            top_unk_scores (Tensor): Opzionale. I punteggi di objectness associati.
             
         Returns:
             valid_sam_boxes (Tensor): [M, 4] The perfect boxes (M <= K), used for ETM and RoI.
-            loss_b_unk (Tensor): Scalar value of the refinement loss.
+            loss_b_unk (Tensor): Scalar value of the refinement loss (potentially augmented with objectness loss).
         """
         current_device = top_unknown_boxes.device
         # If RPN did not find any unknown, do nothing
@@ -100,6 +101,10 @@ class UnknownBoxRefineModule(nn.Module):
         sam_boxes = ops.masks_to_boxes(valid_masks)
         top_unknown_boxes_filtered = top_unknown_boxes[valid_mask_idx]
         
+        # Riduciamo gli score coerentemente con le maschere che SAM è riuscito a fare
+        if top_unk_scores is not None:
+            top_unk_scores_filtered = top_unk_scores[valid_mask_idx]
+        
         # --- STEP 4: Hallucination Filtering ---
         # Calculate the IoU between original RPN proposals and perfect SAM masks.
         # ops.box_iou returns a KxK matrix. We are only interested in the diagonal
@@ -114,6 +119,11 @@ class UnknownBoxRefineModule(nn.Module):
         
         if len(valid_sam_boxes) == 0:
              return torch.empty((0, 4), device=current_device), torch.tensor(0.0, device=current_device, requires_grad=True)
+             
+        # Se abbiamo gli score, filtriamo anche quelli in modo rigoroso per estrarre quelli validi finali
+        if top_unk_scores is not None:
+             valid_scores = top_unk_scores_filtered[keep_mask]
+             
         # --- STEP 5: Loss Calculation (L_b,unk) ---
         # This loss trains the RPN (valid_proposals has active gradients) to generate
         # boxes that are more similar to the perfect SAM boxes right from the start.
@@ -128,4 +138,11 @@ class UnknownBoxRefineModule(nn.Module):
         # Combined total loss (as in the original paper)
         loss_b_unk = loss_l1 + loss_giou 
         
+        # 5c. EXPERIMENTAL: Objectness Loss
+        if top_unk_scores is not None:
+            # I punteggi valid_scores sono probabilità uscenti dalla sigmoid della RPN
+            # Spingiamoli tutti al 100% di probabilità per non farli sopprimere.
+            loss_obj = F.binary_cross_entropy(valid_scores.clamp(1e-6, 1.0 - 1e-6), torch.ones_like(valid_scores))
+            loss_b_unk = loss_b_unk + loss_obj
+            
         return valid_sam_boxes, loss_b_unk

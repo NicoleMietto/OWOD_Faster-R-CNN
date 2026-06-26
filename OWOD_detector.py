@@ -185,14 +185,20 @@ class OWODFasterRCNN(nn.Module):
                 _, sort_idx = unk_scores.sort(descending=True)
                 filtered_unknowns = filtered_unknowns[sort_idx]
                 
+                # Allineiamo e tagliamo i punteggi in modo rigoroso esattamente come i box
+                sorted_unk_scores = unk_scores[sort_idx]
+                
                 # Get the TOP K proposals for unknowns to avoid overwhelming the ETM/URM
                 # Abbassato a 5 per ridurre le allucinazioni e velocizzare l'addestramento
                 top_k = 5
                 top_unknowns = filtered_unknowns[:top_k]
+                top_unk_scores = sorted_unk_scores[:top_k]
                 
                 # --- PHASE 3: URM (MobileSAM) ---
                 if self.use_urm:
-                    refined_unknowns, loss_b_unk = self.urm(top_unknowns, images_list.tensors[i])
+                    # Passiamo (se richiesto) anche i punteggi per la loss sperimentale
+                    scores_for_urm = top_unk_scores if self.use_obj_loss else None
+                    refined_unknowns, loss_b_unk = self.urm(top_unknowns, images_list.tensors[i], scores_for_urm)
                     total_loss_b_unk = total_loss_b_unk + loss_b_unk
                 else:
                     # Se l'URM è spento, passiamo comunque all'ETM i riquadri grezzi della RPN!
