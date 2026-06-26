@@ -141,14 +141,18 @@ def main():
     if args.resume and os.path.exists(args.resume):
         print(f"Resuming from checkpoint {args.resume}...")
         checkpoint = torch.load(args.resume, map_location=device)
-        if 'model_state_dict' in checkpoint:
-            base_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-            # Solo se vogliamo riprendere lo stato dell'ottimizzatore
-            # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            if 'best_val_loss' in checkpoint and save_best:
-                best_val_loss = checkpoint['best_val_loss']
-        else:
-            base_model.load_state_dict(checkpoint, strict=False)
+        
+        state_dict_to_load = checkpoint['model_state_dict'] if 'model_state_dict' in checkpoint else checkpoint
+        
+        # Filtro vitale: scartiamo i pesi del checkpoint che hanno forma diversa dal modello attuale
+        # Questo permette di passare da MLP a CNN in totale sicurezza senza errori di "size mismatch"
+        model_dict = base_model.state_dict()
+        filtered_dict = {k: v for k, v in state_dict_to_load.items() if k in model_dict and v.shape == model_dict[k].shape}
+        
+        base_model.load_state_dict(filtered_dict, strict=False)
+
+        if 'best_val_loss' in checkpoint and save_best:
+            best_val_loss = checkpoint['best_val_loss']
             
         # Fast-forward scheduler to start_epoch
         for _ in range(args.start_epoch):
