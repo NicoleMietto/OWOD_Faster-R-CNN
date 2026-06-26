@@ -42,9 +42,15 @@ def evaluate_model(checkpoint_path, val_json_path, image_dir, device, use_spatia
     all_embeddings = []
     all_labels = []
 
-    print("Calcolo Metriche in corso su TUTTE le 5000 immagini di validazione (Test Finale!)...")
+    # Filtriamo a monte le immagini completamente vuote (senza nessun ground truth)
+    valid_images = [img for img in data['images'] if len(img_to_anns[img['id']]) > 0]
     
-    images_to_eval = data['images'] # Valuta su tutto il dataset!
+    # IMPORATAZIONE ABLATION: Usa solo le prime 500 immagini valide. 
+    # (Per il report finale, cambia questo numero in len(valid_images))
+    num_eval_images = min(500, len(valid_images))
+    images_to_eval = valid_images[:num_eval_images]
+    
+    print(f"Calcolo Metriche in corso su {num_eval_images} immagini di validazione (Ablation Mode!)...")
     
     for img_info in tqdm(images_to_eval):
         img_path = os.path.join(image_dir, img_info['file_name'])
@@ -60,7 +66,8 @@ def evaluate_model(checkpoint_path, val_json_path, image_dir, device, use_spatia
 
         # --- PARTE 1: Unknown Recall e Known Recall (Inference Standard) ---
         with torch.no_grad():
-            detections = model([image_tensor])[0]
+            with torch.cuda.amp.autocast():
+                detections = model([image_tensor])[0]
             
         pred_boxes = detections['boxes'].cpu().numpy()
         pred_labels = detections['labels'].cpu().numpy()
@@ -115,16 +122,17 @@ def evaluate_model(checkpoint_path, val_json_path, image_dir, device, use_spatia
         if len(gt_boxes_for_emb) > 0:
             gt_boxes_tensor = torch.tensor(gt_boxes_for_emb, dtype=torch.float32).to(device)
             with torch.no_grad():
-                # Creiamo un finto target per far sì che la transform di Faster RCNN
-                # scali i nostri bounding box coerentemente con il resize dell'immagine!
-                target = [{'boxes': gt_boxes_tensor, 'labels': torch.tensor(gt_labels_for_emb, device=device)}]
-                images_list, targets_list = model.detector.transform([image_tensor], target)
-                
-                features = model.detector.backbone(images_list.tensors)
-                # Usiamo le boxes trasformate (targets_list) e le vere dimensioni dell'immagine scalata
-                box_features = model.detector.roi_heads.box_roi_pool(features, [t['boxes'] for t in targets_list], images_list.image_sizes)
-                
-                embeddings = model.embedding_head(box_features)
+                with torch.cuda.amp.autocast():
+                    # Creiamo un finto target per far sì che la transform di Faster RCNN
+                    # scali i nostri bounding box coerentemente con il resize dell'immagine!
+                    target = [{'boxes': gt_boxes_tensor, 'labels': torch.tensor(gt_labels_for_emb, device=device)}]
+                    images_list, targets_list = model.detector.transform([image_tensor], target)
+                    
+                    features = model.detector.backbone(images_list.tensors)
+                    # Usiamo le boxes trasformate (targets_list) e le vere dimensioni dell'immagine scalata
+                    box_features = model.detector.roi_heads.box_roi_pool(features, [t['boxes'] for t in targets_list], images_list.image_sizes)
+                    
+                    embeddings = model.embedding_head(box_features)
                 all_embeddings.append(embeddings.cpu().numpy())
                 all_labels.extend(gt_labels_for_emb)
 
@@ -134,16 +142,23 @@ def evaluate_model(checkpoint_path, val_json_path, image_dir, device, use_spatia
     
     print("\nCalcolo Recall@1 sugli Embeddings...")
     hits_r1 = 0
-    # Per ogni embedding, trova il più vicino usando distanza del coseno
     # Normalizziamo X
     X_norm = X / np.linalg.norm(X, axis=1, keepdims=True)
-    # Calcolo similarità (lento se troppi oggetti, max 5000)
-    for i in tqdm(range(X_norm.shape[0])):
-        sims = np.dot(X_norm, X_norm[i])
-        sims[i] = -1 # ignora se stesso
-        closest_idx = np.argmax(sims)
-        if Y[closest_idx] == Y[i]:
-            hits_r1 += 1
+    
+    # Eseguiamo il calcolo delle similarità vettorializzato su GPU (velocissimo)
+    X_tensor = torch.tensor(X_norm, device=device, dtype=torch.float32)
+    Y_tensor = torch.tensor(Y, device=device)
+    
+    # Calcola matrice NxN in un colpo solo
+    sims = torch.mm(X_tensor, X_tensor.t())
+    # Ignora se stessi mettendo la diagonale a -1
+    sims.fill_diagonal_(-1)
+    
+    # Trova l'indice del vicino più prossimo per tutti gli elementi contemporaneamente
+    closest_idx = torch.argmax(sims, dim=1)
+    
+    # Conta quanti hanno la stessa etichetta
+    hits_r1 = (Y_tensor[closest_idx] == Y_tensor).sum().item()
             
     recall_at_1 = (hits_r1 / len(Y)) * 100
     u_recall = (hits_unknown / total_gt_unknown) * 100 if total_gt_unknown > 0 else 0
