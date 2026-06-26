@@ -66,11 +66,18 @@ def evaluate_model(checkpoint_path, val_json_path, image_dir, device, use_spatia
         pred_labels = detections['labels'].cpu().numpy()
         pred_scores = detections['scores'].cpu().numpy()
         
+        # Faster R-CNN ordina già di default per score decrescente.
+        # Teniamo le top 100 predizioni assolute per l'immagine, che è lo standard COCO per l'Evaluation (incluso U-Recall)
+        top_k = min(100, len(pred_boxes))
+        pred_boxes = pred_boxes[:top_k]
+        pred_labels = pred_labels[:top_k]
+        pred_scores = pred_scores[:top_k]
+
         # Separiamo predizioni
         mask_unk_pred = (pred_labels == 81) | (pred_labels == 11) | (pred_labels == 21)
-        unk_pred_boxes = pred_boxes[mask_unk_pred & (pred_scores > 0.3)]
-        known_pred_boxes = pred_boxes[(~mask_unk_pred) & (pred_scores > 0.3)]
-        known_pred_labels = pred_labels[(~mask_unk_pred) & (pred_scores > 0.3)]
+        unk_pred_boxes = pred_boxes[mask_unk_pred]
+        known_pred_boxes = pred_boxes[~mask_unk_pred]
+        known_pred_labels = pred_labels[~mask_unk_pred]
 
         # --- PARTE 2: Recall@1 (Estrazione Embeddings sui Ground Truth) ---
         gt_boxes_for_emb = []
@@ -147,7 +154,7 @@ def evaluate_model(checkpoint_path, val_json_path, image_dir, device, use_spatia
     print("="*40)
     print(f"Known Recall (Proxy per mAP): {k_recall:.2f}% ({hits_known}/{total_gt_known})")
     print(f"Unknown Recall (U-Recall):    {u_recall:.2f}% ({hits_unknown}/{total_gt_unknown})")
-    print(f"Recall@1 (Embeddings):        {recall_at_1:.2f}% ({hits_r1}/{len(Y)})")
+    print(f"GT-Recall@1 (Oracle Embeddings): {recall_at_1:.2f}% ({hits_r1}/{len(Y)})")
     print("="*40)
 
 if __name__ == "__main__":
