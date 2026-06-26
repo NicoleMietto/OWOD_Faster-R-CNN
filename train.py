@@ -68,6 +68,7 @@ def main():
     parser.add_argument('--batch_size', type=int, default=6, help="Batch size")
     parser.add_argument('--lr', type=float, default=1e-4, help="Learning rate")
     parser.add_argument('--use_spatial_cnn', action='store_true', help="Use CNN instead of MLP for ETM")
+    parser.add_argument('--use_obj_loss', action='store_true', help="Attiva la BCE loss sperimentale sull'objectness in URM")
     args = parser.parse_args()
 
     set_seed(42)
@@ -99,6 +100,7 @@ def main():
     )
     base_model.use_etm = use_etm
     base_model.use_urm = use_urm
+    base_model.use_obj_loss = args.use_obj_loss
     base_model.dinov2 = dinov2
 
     train_dataset = OWODDataset(
