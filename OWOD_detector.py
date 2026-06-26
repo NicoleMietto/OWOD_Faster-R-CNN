@@ -54,6 +54,7 @@ class OWODFasterRCNN(nn.Module):
         self.beta = beta
         self.use_etm = False
         self.use_urm = False
+        self.use_obj_loss = False
         
         # 1. Load Faster R-CNN with ResNet50 pre-trained ONLY on ImageNet (not COCO!)
         # It is CRITICAL to use weights=None and weights_backbone='DEFAULT' for Open World.
