@@ -62,7 +62,7 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
         pred_labels = detections['labels'].cpu().numpy()
         pred_scores = detections['scores'].cpu().numpy()
         
-        # Filtra Top 100
+        # Filtra Top 100 per partire da una base pulita
         top_k = min(100, len(pred_boxes))
         pred_boxes = pred_boxes[:top_k]
         pred_labels = pred_labels[:top_k]
@@ -70,70 +70,63 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
 
         # Separiamo predizioni Known e Unknown
         mask_unk_pred = (pred_labels == 11) | (pred_labels == 81) | (pred_labels == 21)
+        
         unk_pred_boxes = pred_boxes[mask_unk_pred]
         unk_pred_scores = pred_scores[mask_unk_pred]
         
-        # Estraiamo i Ground Truth Known e Unknown per filtrare le predizioni
-        gt_unk_boxes = []
-        gt_known_boxes = []
-        for ann in anns:
-            x, y, w, h = ann['bbox']
-            if w > 10 and h > 10:
-                if ann['category_id'] not in known_classes:
-                    gt_unk_boxes.append([x, y, x+w, y+h])
-                else:
-                    gt_known_boxes.append([x, y, x+w, y+h])
+        known_pred_boxes = pred_boxes[~mask_unk_pred]
+        known_pred_scores = pred_scores[~mask_unk_pred]
+        known_pred_labels = pred_labels[~mask_unk_pred]
 
-        # 1. Filtra predizioni sconosciute che si sovrappongono ai GROUND TRUTH KNOWN
-        if len(gt_known_boxes) > 0 and len(unk_pred_boxes) > 0:
-            unk_tensor = torch.tensor(unk_pred_boxes, dtype=torch.float32)
-            known_gt_tensor = torch.tensor(gt_known_boxes, dtype=torch.float32)
-            ious = box_iou(unk_tensor, known_gt_tensor)
-            max_ious, _ = ious.max(dim=1)
-            
-            # Scarta box sconosciuti che collidono con box noti reali (>0.3 di IoU)
-            keep_mask = (max_ious < 0.3).numpy()
-            unk_pred_boxes = unk_pred_boxes[keep_mask]
-            unk_pred_scores = unk_pred_scores[keep_mask]
+        # --- NMS SUI KNOWN E UNKNOWN SEPARATAMENTE ---
+        # Così mostriamo le predizioni reali senza filtri "magici" legati al Ground Truth
+        if len(known_pred_boxes) > 0:
+            k_tensor = torch.tensor(known_pred_boxes, dtype=torch.float32)
+            k_scores = torch.tensor(known_pred_scores, dtype=torch.float32)
+            keep_k = torchvision.ops.nms(k_tensor, k_scores, iou_threshold=0.4)
+            # Prendiamo i top 10 KNOWN
+            known_pred_boxes = known_pred_boxes[keep_k.numpy()][:10]
+            known_pred_scores = known_pred_scores[keep_k.numpy()][:10]
+            known_pred_labels = known_pred_labels[keep_k.numpy()][:10]
 
-        # 2. Applica NMS (Non-Maximum Suppression) tra le sole predizioni sconosciute 
-        # per evitare che "l'immagine esploda" con decine di box sovrapposti
         if len(unk_pred_boxes) > 0:
-            unk_tensor = torch.tensor(unk_pred_boxes, dtype=torch.float32)
-            unk_scores_tensor = torch.tensor(unk_pred_scores, dtype=torch.float32)
-            # torchvision.ops.nms restituisce gli indici da tenere
-            keep_indices = torchvision.ops.nms(unk_tensor, unk_scores_tensor, iou_threshold=0.3)
-            unk_pred_boxes = unk_tensor[keep_indices].numpy()
-            unk_pred_scores = unk_scores_tensor[keep_indices].numpy()
-                    
-        hits = 0
-        valid_unk_preds = []
+            u_tensor = torch.tensor(unk_pred_boxes, dtype=torch.float32)
+            u_scores = torch.tensor(unk_pred_scores, dtype=torch.float32)
+            keep_u = torchvision.ops.nms(u_tensor, u_scores, iou_threshold=0.4)
+            # Prendiamo i top 10 UNKNOWN
+            unk_pred_boxes = unk_pred_boxes[keep_u.numpy()][:10]
+            unk_pred_scores = unk_pred_scores[keep_u.numpy()][:10]
+            
+        # Estraiamo i Ground Truth Sconosciuti (solo per ordinare le immagini e disegnarli come riferimento)
+        gt_unk_boxes = []
+        for ann in anns:
+            if ann['category_id'] not in known_classes:
+                x, y, w, h = ann['bbox']
+                if w > 10 and h > 10:
+                    gt_unk_boxes.append([x, y, x+w, y+h])
+
         max_iou_in_image = 0.0
-        
         if len(gt_unk_boxes) > 0 and len(unk_pred_boxes) > 0:
             gt_tensor = torch.tensor(gt_unk_boxes, dtype=torch.float32)
             pred_tensor = torch.tensor(unk_pred_boxes, dtype=torch.float32)
             ious = box_iou(gt_tensor, pred_tensor)
             
-            # Troviamo i migliori "Hit" per mostrare le detection sconosciute più precise
             max_ious, _ = ious.max(dim=0)
-            for j, iou_val in enumerate(max_ious):
-                if iou_val > 0.5:
-                    hits += 1
-                    valid_unk_preds.append((unk_pred_boxes[j], unk_pred_scores[j], iou_val.item()))
-                    if iou_val.item() > max_iou_in_image:
-                        max_iou_in_image = iou_val.item()
-                    
-        if hits > 0:
-            best_results.append({
-                'img_info': img_info,
-                'img_path': img_path,
-                'hits': hits,
-                'max_iou': max_iou_in_image,
-                'valid_unk_preds': valid_unk_preds,
-                'all_preds': (pred_boxes, pred_labels, pred_scores),
-                'gt_unk_boxes': gt_unk_boxes
-            })
+            if len(max_ious) > 0:
+                max_iou_in_image = max_ious.max().item()
+
+        # Salviamo TUTTO, a prescindere dal fatto che abbiano beccato il GT o meno (Confronto FAIR)
+        best_results.append({
+            'img_info': img_info,
+            'img_path': img_path,
+            'max_iou': max_iou_in_image,
+            'unk_pred_boxes': unk_pred_boxes,
+            'unk_pred_scores': unk_pred_scores,
+            'known_pred_boxes': known_pred_boxes,
+            'known_pred_scores': known_pred_scores,
+            'known_pred_labels': known_pred_labels,
+            'gt_unk_boxes': gt_unk_boxes
+        })
             
         # Ferma la ricerca appena troviamo un buon pool di immagini da cui estrarre le migliori
         if len(best_results) >= 150:
@@ -141,6 +134,7 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
             break
 
     # Ordina per MASSIMO IOU trovato nell'immagine (vogliamo le immagini con le sovrapposizioni più evidenti)
+    # in modo da mostrarti le immagini "interessanti", ma al loro interno vedrai TUTTA la verità, anche gli errori.
     best_results.sort(key=lambda x: x['max_iou'], reverse=True)
     top_results = best_results[:num_images_to_save]
     
@@ -160,14 +154,19 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
             ax.add_patch(rect)
             ax.text(xmin, ymin-5, "True Unknown (Hidden GT)", color='blue', fontsize=12, weight='bold', backgroundcolor='white')
 
-        # 2. Disegna SOLO le predizioni UNKNOWN (Classe 11) che hanno fatto "Hit" (sovrapposizione)
-        for unk_pred in res['valid_unk_preds']:
-            box, score, iou = unk_pred
+        # 2. Disegna i box KNOWN in VERDE
+        for box, score, label in zip(res['known_pred_boxes'], res['known_pred_scores'], res['known_pred_labels']):
             xmin, ymin, xmax, ymax = box
-            
-            rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=4, edgecolor='red', facecolor='none')
+            rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=2, edgecolor='green', facecolor='none')
             ax.add_patch(rect)
-            ax.text(xmin, ymin-20, f"Predicted UNKNOWN! (IoU: {iou:.2f} | Score: {score:.2f})", color='white', fontsize=12, weight='bold', backgroundcolor='red')
+            ax.text(xmin, ymin-5, f"Known {int(label)} ({score:.2f})", color='white', fontsize=10, weight='bold', backgroundcolor='green')
+
+        # 3. Disegna i box UNKNOWN in ROSSO (Tutti i top 10 previsti, giusti o sbagliati)
+        for box, score in zip(res['unk_pred_boxes'], res['unk_pred_scores']):
+            xmin, ymin, xmax, ymax = box
+            rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=3, edgecolor='red', facecolor='none')
+            ax.add_patch(rect)
+            ax.text(xmin, ymin-20, f"Predicted UNKNOWN! ({score:.2f})", color='white', fontsize=12, weight='bold', backgroundcolor='red')
 
         plt.axis('off')
         plt.tight_layout()
