@@ -68,9 +68,34 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
         pred_labels = pred_labels[:top_k]
         pred_scores = pred_scores[:top_k]
 
+        # Separiamo predizioni Known e Unknown
         mask_unk_pred = (pred_labels == 11) | (pred_labels == 81) | (pred_labels == 21)
         unk_pred_boxes = pred_boxes[mask_unk_pred]
         unk_pred_scores = pred_scores[mask_unk_pred]
+        
+        known_pred_boxes = pred_boxes[~mask_unk_pred]
+        known_pred_scores = pred_scores[~mask_unk_pred]
+        
+        # Filtriamo le Known Predictions con confidenza decente (es. > 0.3)
+        valid_known_mask = known_pred_scores > 0.3
+        valid_known_boxes = known_pred_boxes[valid_known_mask]
+        
+        # --- CROSS-CLASS NMS ---
+        # Rimuoviamo gli Unknown che si sovrappongono troppo a oggetti Noti
+        if len(valid_known_boxes) > 0 and len(unk_pred_boxes) > 0:
+            unk_tensor = torch.tensor(unk_pred_boxes, dtype=torch.float32)
+            known_tensor = torch.tensor(valid_known_boxes, dtype=torch.float32)
+            ious = box_iou(unk_tensor, known_tensor) # Forma: (N_unk, N_known)
+            max_ious, _ = ious.max(dim=1)
+            
+            # Teniamo solo gli unknown che NON si sovrappongono a oggetti noti (IoU < 0.4)
+            keep_mask = (max_ious < 0.4).numpy()
+            unk_pred_boxes = unk_pred_boxes[keep_mask]
+            unk_pred_scores = unk_pred_scores[keep_mask]
+
+        # UTENTE REQUEST: Prendi SOLO le Top-5 predizioni Unknown (purificate!)
+        unk_pred_boxes = unk_pred_boxes[:5]
+        unk_pred_scores = unk_pred_scores[:5]
         
         # Estrai i Ground Truth UNKNOWN reali
         gt_unk_boxes = []
@@ -125,23 +150,16 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
             xmin, ymin, xmax, ymax = gt_box
             rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=2, edgecolor='blue', facecolor='none', linestyle='--')
             ax.add_patch(rect)
-            ax.text(xmin, ymin-5, "True Unknown (COCO)", color='blue', fontsize=10, weight='bold')
+            ax.text(xmin, ymin-5, "True Unknown (Hidden GT)", color='blue', fontsize=12, weight='bold', backgroundcolor='white')
 
-        # 2. Disegna le predizioni della rete
-        pred_boxes, pred_labels, pred_scores = res['all_preds']
-        for i in range(len(pred_boxes)):
-            if pred_scores[i] < 0.3: continue # Mostra solo quelli sicuri
+        # 2. Disegna SOLO le predizioni UNKNOWN (Classe 11) che hanno fatto "Hit" (sovrapposizione)
+        for unk_pred in res['valid_unk_preds']:
+            box, score = unk_pred
+            xmin, ymin, xmax, ymax = box
             
-            xmin, ymin, xmax, ymax = pred_boxes[i]
-            is_unk = (pred_labels[i] == 11 or pred_labels[i] == 81 or pred_labels[i] == 21)
-            
-            color = 'red' if is_unk else 'green'
-            label_name = 'UNKNOWN!' if is_unk else f'Known ({pred_labels[i]})'
-            linewidth = 3 if is_unk else 1
-            
-            rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=linewidth, edgecolor=color, facecolor='none')
+            rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=4, edgecolor='red', facecolor='none')
             ax.add_patch(rect)
-            ax.text(xmin, ymin-5, f"{label_name} {pred_scores[i]:.2f}", color=color, fontsize=10, weight='bold', backgroundcolor='white')
+            ax.text(xmin, ymin-20, f"Predicted UNKNOWN! ({score:.2f})", color='white', fontsize=12, weight='bold', backgroundcolor='red')
 
         plt.axis('off')
         plt.tight_layout()
