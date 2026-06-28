@@ -46,8 +46,8 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
     best_results = []
 
     print("Ricerca delle migliori detection sconosciute...")
-    # Analizziamo un po' di immagini (es. prime 300) per trovare le migliori
-    for img_info, anns in tqdm(valid_images[:300]):
+    # Analizziamo le immagini finché non ne troviamo abbastanza di spettacolari
+    for img_info, anns in tqdm(valid_images):
         img_path = os.path.join(image_dir, img_info['file_name'])
         if not os.path.exists(img_path): continue
             
@@ -73,67 +73,75 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
         unk_pred_boxes = pred_boxes[mask_unk_pred]
         unk_pred_scores = pred_scores[mask_unk_pred]
         
-        known_pred_boxes = pred_boxes[~mask_unk_pred]
-        known_pred_scores = pred_scores[~mask_unk_pred]
-        
-        # Filtriamo le Known Predictions con confidenza decente (es. > 0.3)
-        valid_known_mask = known_pred_scores > 0.3
-        valid_known_boxes = known_pred_boxes[valid_known_mask]
-        
-        # --- CROSS-CLASS NMS ---
-        # Rimuoviamo gli Unknown che si sovrappongono troppo a oggetti Noti
-        if len(valid_known_boxes) > 0 and len(unk_pred_boxes) > 0:
+        # Estraiamo i Ground Truth Known e Unknown per filtrare le predizioni
+        gt_unk_boxes = []
+        gt_known_boxes = []
+        for ann in anns:
+            x, y, w, h = ann['bbox']
+            if w > 10 and h > 10:
+                if ann['category_id'] not in known_classes:
+                    gt_unk_boxes.append([x, y, x+w, y+h])
+                else:
+                    gt_known_boxes.append([x, y, x+w, y+h])
+
+        # 1. Filtra predizioni sconosciute che si sovrappongono ai GROUND TRUTH KNOWN
+        if len(gt_known_boxes) > 0 and len(unk_pred_boxes) > 0:
             unk_tensor = torch.tensor(unk_pred_boxes, dtype=torch.float32)
-            known_tensor = torch.tensor(valid_known_boxes, dtype=torch.float32)
-            ious = box_iou(unk_tensor, known_tensor) # Forma: (N_unk, N_known)
+            known_gt_tensor = torch.tensor(gt_known_boxes, dtype=torch.float32)
+            ious = box_iou(unk_tensor, known_gt_tensor)
             max_ious, _ = ious.max(dim=1)
             
-            # Teniamo solo gli unknown che NON si sovrappongono a oggetti noti (IoU < 0.4)
-            keep_mask = (max_ious < 0.4).numpy()
+            # Scarta box sconosciuti che collidono con box noti reali (>0.3 di IoU)
+            keep_mask = (max_ious < 0.3).numpy()
             unk_pred_boxes = unk_pred_boxes[keep_mask]
             unk_pred_scores = unk_pred_scores[keep_mask]
 
-        # UTENTE REQUEST: Prendi SOLO le Top-5 predizioni Unknown (purificate!)
-        unk_pred_boxes = unk_pred_boxes[:5]
-        unk_pred_scores = unk_pred_scores[:5]
-        
-        # Estrai i Ground Truth UNKNOWN reali
-        gt_unk_boxes = []
-        for ann in anns:
-            if ann['category_id'] not in known_classes:
-                x, y, w, h = ann['bbox']
-                if w > 10 and h > 10:
-                    gt_unk_boxes.append([x, y, x+w, y+h])
+        # 2. Applica NMS (Non-Maximum Suppression) tra le sole predizioni sconosciute 
+        # per evitare che "l'immagine esploda" con decine di box sovrapposti
+        if len(unk_pred_boxes) > 0:
+            unk_tensor = torch.tensor(unk_pred_boxes, dtype=torch.float32)
+            unk_scores_tensor = torch.tensor(unk_pred_scores, dtype=torch.float32)
+            # torchvision.ops.nms restituisce gli indici da tenere
+            keep_indices = torchvision.ops.nms(unk_tensor, unk_scores_tensor, iou_threshold=0.3)
+            unk_pred_boxes = unk_tensor[keep_indices].numpy()
+            unk_pred_scores = unk_scores_tensor[keep_indices].numpy()
                     
-        # Calcola quanti Hit perfetti abbiamo fatto
         hits = 0
         valid_unk_preds = []
+        max_iou_in_image = 0.0
         
         if len(gt_unk_boxes) > 0 and len(unk_pred_boxes) > 0:
             gt_tensor = torch.tensor(gt_unk_boxes, dtype=torch.float32)
             pred_tensor = torch.tensor(unk_pred_boxes, dtype=torch.float32)
             ious = box_iou(gt_tensor, pred_tensor)
             
-            # Per ogni predizione, vediamo se ha beccato un GT ignoto
+            # Troviamo i migliori "Hit" per mostrare le detection sconosciute più precise
             max_ious, _ = ious.max(dim=0)
-            
             for j, iou_val in enumerate(max_ious):
                 if iou_val > 0.5:
                     hits += 1
-                    valid_unk_preds.append((unk_pred_boxes[j], unk_pred_scores[j]))
+                    valid_unk_preds.append((unk_pred_boxes[j], unk_pred_scores[j], iou_val.item()))
+                    if iou_val.item() > max_iou_in_image:
+                        max_iou_in_image = iou_val.item()
                     
         if hits > 0:
             best_results.append({
                 'img_info': img_info,
                 'img_path': img_path,
                 'hits': hits,
+                'max_iou': max_iou_in_image,
                 'valid_unk_preds': valid_unk_preds,
                 'all_preds': (pred_boxes, pred_labels, pred_scores),
                 'gt_unk_boxes': gt_unk_boxes
             })
+            
+        # Ferma la ricerca appena troviamo un buon pool di immagini da cui estrarre le migliori
+        if len(best_results) >= 150:
+            print("\nTrovato un ampio campione di immagini candidate. Interrompo la ricerca!")
+            break
 
-    # Ordina per numero di hit trovati (immagini più spettacolari)
-    best_results.sort(key=lambda x: x['hits'], reverse=True)
+    # Ordina per MASSIMO IOU trovato nell'immagine (vogliamo le immagini con le sovrapposizioni più evidenti)
+    best_results.sort(key=lambda x: x['max_iou'], reverse=True)
     top_results = best_results[:num_images_to_save]
     
     print(f"\nGenerazione di {len(top_results)} immagini spettacolari nella cartella {output_dir}...")
@@ -154,12 +162,12 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
 
         # 2. Disegna SOLO le predizioni UNKNOWN (Classe 11) che hanno fatto "Hit" (sovrapposizione)
         for unk_pred in res['valid_unk_preds']:
-            box, score = unk_pred
+            box, score, iou = unk_pred
             xmin, ymin, xmax, ymax = box
             
             rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=4, edgecolor='red', facecolor='none')
             ax.add_patch(rect)
-            ax.text(xmin, ymin-20, f"Predicted UNKNOWN! ({score:.2f})", color='white', fontsize=12, weight='bold', backgroundcolor='red')
+            ax.text(xmin, ymin-20, f"Predicted UNKNOWN! (IoU: {iou:.2f} | Score: {score:.2f})", color='white', fontsize=12, weight='bold', backgroundcolor='red')
 
         plt.axis('off')
         plt.tight_layout()
