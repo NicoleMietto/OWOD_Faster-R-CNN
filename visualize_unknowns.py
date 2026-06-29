@@ -1,7 +1,7 @@
 import torch
 import torchvision
 from torchvision.transforms import functional as F
-from OWOD_detector_fixed import OWODFasterRCNN_Fixed
+from OWOD_detector_mlp_filtered import OWODFasterRCNN_Fixed
 import json
 import os
 import matplotlib.pyplot as plt
@@ -84,18 +84,24 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
             k_tensor = torch.tensor(known_pred_boxes, dtype=torch.float32)
             k_scores = torch.tensor(known_pred_scores, dtype=torch.float32)
             keep_k = torchvision.ops.nms(k_tensor, k_scores, iou_threshold=0.4)
+            
+            # Applichiamo NMS e filtriamo per soglia minima (es. > 0.3)
+            keep_idx = keep_k.numpy()
+            high_conf_mask = known_pred_scores[keep_idx] > 0.3
+            keep_idx = keep_idx[high_conf_mask]
+            
             # Prendiamo i top 10 KNOWN
-            known_pred_boxes = known_pred_boxes[keep_k.numpy()][:10]
-            known_pred_scores = known_pred_scores[keep_k.numpy()][:10]
-            known_pred_labels = known_pred_labels[keep_k.numpy()][:10]
+            known_pred_boxes = known_pred_boxes[keep_idx][:10]
+            known_pred_scores = known_pred_scores[keep_idx][:10]
+            known_pred_labels = known_pred_labels[keep_idx][:10]
 
         if len(unk_pred_boxes) > 0:
             u_tensor = torch.tensor(unk_pred_boxes, dtype=torch.float32)
             u_scores = torch.tensor(unk_pred_scores, dtype=torch.float32)
             keep_u = torchvision.ops.nms(u_tensor, u_scores, iou_threshold=0.4)
-            # Prendiamo i top 10 UNKNOWN
-            unk_pred_boxes = unk_pred_boxes[keep_u.numpy()][:10]
-            unk_pred_scores = unk_pred_scores[keep_u.numpy()][:10]
+            # Prendiamo i top 5 UNKNOWN
+            unk_pred_boxes = unk_pred_boxes[keep_u.numpy()][:5]
+            unk_pred_scores = unk_pred_scores[keep_u.numpy()][:5]
             
         # Estraiamo i Ground Truth Sconosciuti (solo per ordinare le immagini e disegnarli come riferimento)
         gt_unk_boxes = []
