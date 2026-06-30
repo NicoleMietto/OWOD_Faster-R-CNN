@@ -314,8 +314,8 @@ class OWODFasterRCNN(nn.Module):
                         unk_scores = unk_scores[cross_keep]
                     
                     # Take top-K to avoid flooding predictions
-                    # Limitiamo a 5 gli unknown estratti per immagine
-                    top_k_infer = 5
+                    # Inizialmente limitato a 5. Ora impostato a 100 (Standard COCO) per un confronto equo con l'Exp 4!
+                    top_k_infer = 100
                     unk_boxes = unk_boxes[:top_k_infer]
                     unk_scores = unk_scores[:top_k_infer]
                     

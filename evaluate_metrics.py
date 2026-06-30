@@ -47,10 +47,10 @@ def evaluate_model(checkpoint_path, val_json_path, image_dir, device, use_spatia
     
     # IMPORATAZIONE ABLATION: Usa solo le prime 500 immagini valide. 
     # (Per il report finale, cambia questo numero in len(valid_images))
-    num_eval_images = min(500, len(valid_images))
+    num_eval_images = len(valid_images)
     images_to_eval = valid_images[:num_eval_images]
     
-    print(f"Calcolo Metriche in corso su {num_eval_images} immagini di validazione (Ablation Mode!)...")
+    print(f"Calcolo Metriche in corso su {num_eval_images} immagini di validazione...")
     
     for img_info in tqdm(images_to_eval):
         img_path = os.path.join(image_dir, img_info['file_name'])
