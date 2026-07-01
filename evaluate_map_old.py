@@ -25,7 +25,8 @@ def evaluate_map(checkpoint_path, val_json_path, image_dir, device, use_spatial_
     with open(val_json_path, 'r') as f:
         data = json.load(f)
         
-    known_classes = {1, 3, 5, 17, 27, 44, 52, 62, 72, 84}
+    known_classes_list = [1, 3, 5, 17, 27, 44, 52, 62, 72, 84]
+    cat_to_cont = {cat_id: i + 1 for i, cat_id in enumerate(known_classes_list)}
     
     img_to_anns = {img['id']: [] for img in data['images']}
     for ann in data['annotations']:
@@ -33,8 +34,10 @@ def evaluate_map(checkpoint_path, val_json_path, image_dir, device, use_spatial_
 
     valid_images = [img for img in data['images'] if len(img_to_anns[img['id']]) > 0]
     
+    # PER IL REPORT FINALE USA TUTTE LE IMMAGINI
     images_to_eval = valid_images
     
+    # Inizializza la metrica
     metric = MeanAveragePrecision(box_format='xyxy', iou_type='bbox', class_metrics=False)
     
     print(f"Calcolo mAP in corso su {len(images_to_eval)} immagini di validazione...")
@@ -59,7 +62,12 @@ def evaluate_map(checkpoint_path, val_json_path, image_dir, device, use_spatial_
         pred_labels = detections['labels'].cpu()
         pred_scores = detections['scores'].cpu()
         
-        # Filtro (Senza la classe 11/21/81 degli sconosciuti, dato che non c'era)
+        # Filtro: rimuovi solo Unknown
+        mask_known = (pred_labels != 11)
+        pred_boxes = pred_boxes[mask_known]
+        pred_labels = pred_labels[mask_known]
+        pred_scores = pred_scores[mask_known]
+        
         top_k = min(100, len(pred_boxes))
         pred_boxes = pred_boxes[:top_k]
         pred_labels = pred_labels[:top_k]
@@ -77,9 +85,9 @@ def evaluate_map(checkpoint_path, val_json_path, image_dir, device, use_spatial_
         gt_labels_list = []
         for ann in anns:
             x, y, w, h = ann['bbox']
-            if ann['category_id'] in known_classes:
+            if ann['category_id'] in cat_to_cont:
                 gt_boxes_list.append([x, y, x+w, y+h])
-                gt_labels_list.append(ann['category_id'])
+                gt_labels_list.append(cat_to_cont[ann['category_id']])
                 
         if len(gt_boxes_list) > 0:
             target = [

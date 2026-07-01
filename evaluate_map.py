@@ -23,7 +23,8 @@ def evaluate_map(checkpoint_path, val_json_path, image_dir, device, use_spatial_
     with open(val_json_path, 'r') as f:
         data = json.load(f)
         
-    known_classes = {1, 3, 5, 17, 27, 44, 52, 62, 72, 84}
+    known_classes_list = [1, 3, 5, 17, 27, 44, 52, 62, 72, 84]
+    cat_to_cont = {cat_id: i + 1 for i, cat_id in enumerate(known_classes_list)}
     
     img_to_anns = {img['id']: [] for img in data['images']}
     for ann in data['annotations']:
@@ -84,9 +85,9 @@ def evaluate_map(checkpoint_path, val_json_path, image_dir, device, use_spatial_
         gt_labels_list = []
         for ann in anns:
             x, y, w, h = ann['bbox']
-            if ann['category_id'] in known_classes:
+            if ann['category_id'] in cat_to_cont:
                 gt_boxes_list.append([x, y, x+w, y+h])
-                gt_labels_list.append(ann['category_id'])
+                gt_labels_list.append(cat_to_cont[ann['category_id']])
                 
         if len(gt_boxes_list) > 0:
             target = [
