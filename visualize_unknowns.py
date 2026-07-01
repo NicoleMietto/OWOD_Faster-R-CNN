@@ -10,7 +10,7 @@ from PIL import Image
 from tqdm import tqdm
 from torchvision.ops import box_iou
 
-def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_dir, device, num_images_to_save=10, use_spatial_cnn=False):
+def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_dir, device, num_images_to_save=10, use_spatial_cnn=False, target_image_id=None):
     print(f"Caricamento modello da {checkpoint_path}...")
     model = OWODFasterRCNN_Fixed(num_known_classes=10, use_spatial_cnn=use_spatial_cnn)
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -36,6 +36,8 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
     # Filtra solo le immagini che contengono ALMENO un Ground Truth Sconosciuto
     valid_images = []
     for img in data['images']:
+        if target_image_id is not None and img['id'] != target_image_id:
+            continue
         anns = img_to_anns[img['id']]
         has_unknown_gt = any(ann['category_id'] not in known_classes for ann in anns)
         if has_unknown_gt:
@@ -157,11 +159,12 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
         ax.imshow(image)
         
         # 1. Disegna i Ground Truth Sconosciuti REALI in BLU tratteggiato
-        for gt_box in res['gt_unk_boxes']:
-            xmin, ymin, xmax, ymax = gt_box
-            rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=2, edgecolor='blue', facecolor='none', linestyle='--')
-            ax.add_patch(rect)
-            ax.text(xmin, ymin-5, "True Unknown (Hidden GT)", color='blue', fontsize=12, weight='bold', backgroundcolor='white')
+        # (L'abbiamo disattivato per rendere l'immagine meno caotica e più pulita per il paper)
+        # for gt_box in res['gt_unk_boxes']:
+        #     xmin, ymin, xmax, ymax = gt_box
+        #     rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=2, edgecolor='blue', facecolor='none', linestyle='--')
+        #     ax.add_patch(rect)
+        #     ax.text(xmin, ymin-5, "True Unknown (Hidden GT)", color='blue', fontsize=12, weight='bold', backgroundcolor='white')
 
         # 2. Disegna i box KNOWN in VERDE
         for box, score, label in zip(res['known_pred_boxes'], res['known_pred_scores'], res['known_pred_labels']):
@@ -190,6 +193,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to best_model_fixed.pth")
     parser.add_argument("--use_spatial_cnn", action="store_true")
+    parser.add_argument("--target_image_id", type=int, default=None, help="Esegui solo su questo specifico Image ID")
     args = parser.parse_args()
     
     val_json = "/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/annotations/instances_val2017.json"
@@ -197,4 +201,4 @@ if __name__ == "__main__":
     output_dir = "/kaggle/working/unknown_visualizations"
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     
-    visualize_best_unknowns(args.checkpoint, val_json, img_dir, output_dir, device, num_images_to_save=10, use_spatial_cnn=args.use_spatial_cnn)
+    visualize_best_unknowns(args.checkpoint, val_json, img_dir, output_dir, device, num_images_to_save=10, use_spatial_cnn=args.use_spatial_cnn, target_image_id=args.target_image_id)
