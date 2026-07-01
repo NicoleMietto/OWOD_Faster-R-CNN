@@ -10,9 +10,18 @@ from PIL import Image
 from tqdm import tqdm
 from torchvision.ops import box_iou
 
-def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_dir, device, num_images_to_save=10, use_spatial_cnn=False, target_image_id=None):
+def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_dir, device, num_images_to_save=10, use_spatial_cnn=False, target_image_id=None, is_baseline=False):
     print(f"Caricamento modello da {checkpoint_path}...")
-    model = OWODFasterRCNN_Fixed(num_known_classes=10, use_spatial_cnn=use_spatial_cnn)
+    
+    if is_baseline:
+        from torchvision.models.detection import fasterrcnn_resnet50_fpn
+        from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+        model = fasterrcnn_resnet50_fpn(pretrained=False, pretrained_backbone=False)
+        in_features = model.roi_heads.box_predictor.cls_score.in_features
+        model.roi_heads.box_predictor = FastRCNNPredictor(in_features, 11) # 10 + background
+    else:
+        model = OWODFasterRCNN_Fixed(num_known_classes=10, use_spatial_cnn=use_spatial_cnn)
+        
     checkpoint = torch.load(checkpoint_path, map_location=device)
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'], strict=False)
@@ -165,20 +174,21 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
         #     rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=2, edgecolor='blue', facecolor='none', linestyle='--')
         #     ax.add_patch(rect)
         #     ax.text(xmin, ymin-5, "True Unknown (Hidden GT)", color='blue', fontsize=12, weight='bold', backgroundcolor='white')
-
         # 2. Disegna i box KNOWN in VERDE
         for box, score, label in zip(res['known_pred_boxes'], res['known_pred_scores'], res['known_pred_labels']):
             xmin, ymin, xmax, ymax = box
             rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=2, edgecolor='green', facecolor='none')
             ax.add_patch(rect)
-            ax.text(xmin, ymin-5, f"Known {int(label)} ({score:.2f})", color='white', fontsize=10, weight='bold', backgroundcolor='green')
+            label_text = f"KN-{label} ({score:.2f})"
+            ax.text(xmin, ymin-5, label_text, color='white', fontsize=12, weight='bold', backgroundcolor='green')
 
-        # 3. Disegna i box UNKNOWN in ROSSO (Tutti i top 10 previsti, giusti o sbagliati)
+        # 3. Disegna i box UNKNOWN PREDETTI in ROSSO
         for box, score in zip(res['unk_pred_boxes'], res['unk_pred_scores']):
             xmin, ymin, xmax, ymax = box
-            rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=3, edgecolor='red', facecolor='none')
+            rect = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=2, edgecolor='red', facecolor='none')
             ax.add_patch(rect)
-            ax.text(xmin, ymin-20, f"Predicted UNKNOWN! ({score:.2f})", color='white', fontsize=12, weight='bold', backgroundcolor='red')
+            label_text = f"UNK ({score:.2f})"
+            ax.text(xmin, ymin-5, label_text, color='white', fontsize=12, weight='bold', backgroundcolor='red')
 
         plt.axis('off')
         plt.tight_layout()
@@ -194,6 +204,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to best_model_fixed.pth")
     parser.add_argument("--use_spatial_cnn", action="store_true")
     parser.add_argument("--target_image_id", type=int, default=None, help="Esegui solo su questo specifico Image ID")
+    parser.add_argument("--is_baseline", action="store_true", help="Usa il modello baseline a 11 classi (senza unknown esplicita)")
     args = parser.parse_args()
     
     val_json = "/kaggle/input/datasets/awsaf49/coco-2017-dataset/coco2017/annotations/instances_val2017.json"
@@ -201,4 +212,4 @@ if __name__ == "__main__":
     output_dir = "/kaggle/working/unknown_visualizations"
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     
-    visualize_best_unknowns(args.checkpoint, val_json, img_dir, output_dir, device, num_images_to_save=10, use_spatial_cnn=args.use_spatial_cnn, target_image_id=args.target_image_id)
+    visualize_best_unknowns(args.checkpoint, val_json, img_dir, output_dir, device, num_images_to_save=10, use_spatial_cnn=args.use_spatial_cnn, target_image_id=args.target_image_id, is_baseline=args.is_baseline)
