@@ -14,9 +14,9 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
     print(f"Caricamento modello da {checkpoint_path}...")
     
     if is_baseline:
-        from torchvision.models.detection import fasterrcnn_resnet50_fpn
+        from torchvision.models.detection import fasterrcnn_resnet50_fpn_v2
         from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
-        model = fasterrcnn_resnet50_fpn(pretrained=False, pretrained_backbone=False)
+        model = fasterrcnn_resnet50_fpn_v2(weights=None, weights_backbone=None)
         in_features = model.roi_heads.box_predictor.cls_score.in_features
         model.roi_heads.box_predictor = FastRCNNPredictor(in_features, 11) # 10 + background
     else:
