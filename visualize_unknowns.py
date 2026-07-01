@@ -43,6 +43,9 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
             
     print(f"Trovate {len(valid_images)} immagini con Ground Truth sconosciuti.")
     
+    import random
+    random.shuffle(valid_images)
+    
     best_results = []
 
     print("Ricerca delle migliori detection sconosciute...")
