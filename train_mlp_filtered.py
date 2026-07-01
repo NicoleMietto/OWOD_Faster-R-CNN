@@ -95,7 +95,7 @@ def main():
     # USIAMO LA CLASSE MODIFICATA
     base_model = OWODFasterRCNN_Fixed(
         num_known_classes=10, 
-        use_spatial_cnn=False, # FORZIAMO L'USO DELLA MLP PER QUESTO ESPERIMENTO
+        use_spatial_cnn=args.use_spatial_cnn, # Usa l'argomento dinamico da linea di comando
         alpha=args.alpha,
         beta=args.beta
     )
