@@ -23,10 +23,21 @@ def visualize_best_unknowns(checkpoint_path, val_json_path, image_dir, output_di
         model = OWODFasterRCNN_Fixed(num_known_classes=10, use_spatial_cnn=use_spatial_cnn)
         
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+    state_dict = checkpoint.get('model_state_dict', checkpoint)
+    
+    if is_baseline:
+        # Il modello originale OWOD wrapava la rete in 'self.detector'
+        # Dobbiamo rimuovere il prefisso 'detector.' per caricare i pesi nella vanilla
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith('detector.'):
+                new_state_dict[k.replace('detector.', '', 1)] = v
+            else:
+                new_state_dict[k] = v
+        model.load_state_dict(new_state_dict, strict=False)
     else:
-        model.load_state_dict(checkpoint, strict=False)
+        model.load_state_dict(state_dict, strict=False)
+        
     model.to(device)
     model.eval()
 
